@@ -1,73 +1,87 @@
-# 画像PDFテキスト処理ツール
+# Image PDF OCR Suite
 
-画像ベースのPDFからテキストを抽出し、「検索可能なPDF」または「テキストファイル」を生成するツール群です。
+画像ベースのPDFにOCR処理を施し、検索可能なPDFへ変換するためのフルスタックアプリケーションです。FastAPIバックエンドでOCR変換を行い、Reactフロントエンドからアップロード・プレビュー・ダウンロードをシームレスに実行できます。
 
-スキャンした書類や、写真から作成したPDFなど、テキスト情報を含まないPDFを、ChatGPTなどのAIが直接読み取れる形式に変換したり、テキストとして保存したりできます。
+## 機能概要
 
-## 事前準備
+- 画像ベースPDFをアップロードしてOCR変換
+- 変換後PDFのブラウザプレビューとダウンロード
+- FastAPIによるREST API `/convert`
+- React（Vite）による単一ページUI
 
-このスクリプトを使用するには、以下の2つのツールを事前にインストールする必要があります。
+## システム構成
 
-### 1. Python
+```
+image-pdf-ocr-suite/
+├── backend/          # FastAPI アプリケーション
+├── frontend/         # React + Vite フロントエンド
+├── image_pdf_ocr/    # OCRロジックをまとめたPythonモジュール
+├── convert_to_searchable_pdf.py  # CLIスクリプト
+├── extract_text_from_pdf.py      # 既存のテキスト抽出スクリプト
+└── requirements.txt
+```
 
-- Python 3.x がインストールされている必要があります。
+## 前提条件
 
-### 2. Tesseract-OCR
+- Python 3.10 以上
+- Node.js 18 以上
+- Tesseract-OCR（日本語データを含む）
+  - [UB Mannheim版インストーラー](https://github.com/UB-Mannheim/tesseract/wiki)を利用すると便利です。
+  - インストール時に `Additional language data` → `Japanese` を選択し、可能ならシステムPATHへ追加してください。
 
-OCRを実行するためのエンジンです。
+## セットアップ手順
 
-1.  **インストーラーのダウンロード**:
-    - [こちらのページ](https://github.com/UB-Mannheim/tesseract/wiki)から、ご自身の環境に合ったインストーラー（`tesseract-ocr-w64-setup-*.exe`など）をダウンロードします。
+### 1. Python依存関係のインストール
 
-2.  **インストール**:
-    - ダウンロードしたインストーラーを実行します。
-    - **【重要】** インストール中にコンポーネントを選択する画面（`Choose Components`）で、`Additional language data` を展開し、**`Japanese`** にチェックを入れてください。
-    - ![Tesseract-Language-Select](https://i.imgur.com/g60333v.png)
-    - また、可能であれば**「Add Tesseract to system PATH」** のような、システムパスにTesseractを追加するオプションを有効にしてください。
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windowsでは .venv\\Scripts\\activate
+pip install -r requirements.txt
+```
 
-## スクリプトのセットアップ
+### 2. バックエンドの起動
 
-1.  **Pythonライブラリのインストール**:
-    - ターミナル（コマンドプロンプト）で以下のコマンドを実行し、必要なライブラリをインストールします。
-      ```bash
-      python -m pip install pytesseract Pillow PyMuPDF pandas
-      ```
+```bash
+cd backend
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-## 使い方
+- `http://localhost:8000/docs` にアクセスするとAPIドキュメント（Swagger UI）を確認できます。
 
-目的に応じて2つのスクリプトを使い分けます。
+### 3. フロントエンドのセットアップ・起動
 
-### A) 検索可能なPDFを作成する（推奨）
+別ターミナルで以下を実行します。
 
-元のPDFの見た目はそのままに、テキスト選択や検索が可能な新しいPDFを作成します。**ChatGPTなどでの利用に最適です。**
+```bash
+cd frontend
+npm install
+npm run dev -- --host 0.0.0.0 --port 5173
+```
 
-- **スクリプト:** `convert_to_searchable_pdf.py`
-- **コマンド:**
-    ```bash
-    python convert_to_searchable_pdf.py --input_path "入力PDFのフルパス" --output_path "出力PDFのフルパス"
-    ```
-- **コマンド例:**
-    ```bash
-    python convert_to_searchable_pdf.py --input_path "C:\scans\image_doc.pdf" --output_path "C:\scans\searchable_doc.pdf"
-    ```
+ブラウザで `http://localhost:5173` を開くとUIが表示されます。フロントエンドからPDFをアップロードすると、バックエンドの `/convert` APIを通じてOCR変換が行われ、結果PDFのプレビューとダウンロードが可能です。
 
-### B) テキストファイルとして抽出する
+### 環境変数
 
-PDFからテキスト情報のみを抽出し、`.txt`ファイルとして保存します。
+バックエンドのURLを変更する場合は、`frontend/.env` に以下のように設定できます。
 
-- **スクリプト:** `extract_text_from_pdf.py`
-- **コマンド:**
-    ```bash
-    python extract_text_from_pdf.py --pdf_path "入力PDFのフルパス" --output_path "出力テキストのフルパス"
-    ```
-- **コマンド例:**
-    ```bash
-    python extract_text_from_pdf.py --pdf_path "C:\scans\image_doc.pdf" --output_path "C:\scans\extracted_text.txt"
-    ```
+```
+VITE_API_URL=http://localhost:8000/convert
+```
 
-## 注意点
+## CLIスクリプトとしての利用
 
-- **OCRの精度**: PDF内の画像の品質、文字のフォント、レイアウトの複雑さによって、テキストの認識精度は変わります。100%完璧に抽出できるわけではありません。
-- **Tesseract-OCRが見つからないエラー**:
-  - スクリプトはTesseract-OCRを自動で検出しようとしますが、見つからない場合はエラーメッセージが表示されます。
-  - その際は、Tesseract-OCRが正しくインストールされているか（特に日本語パック）、システムのPATHに登録されているかをご確認ください。
+GUIではなくコマンドラインで変換したい場合は、従来通り `convert_to_searchable_pdf.py` を使用できます。
+
+```bash
+python convert_to_searchable_pdf.py --input_path "入力PDFのパス" --output_path "出力PDFのパス"
+```
+
+## 開発用スクリプト
+
+- バックエンドAPIの起動: `uvicorn app.main:app --reload`
+- フロントエンドのビルド: `npm run build`
+- フロントエンドのLint: `npm run lint`
+
+## ライセンス
+
+本プロジェクトは [MIT License](LICENSE) の下で提供されます。
