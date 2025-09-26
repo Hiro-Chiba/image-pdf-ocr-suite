@@ -1,0 +1,4 @@
+﻿pytesseract
+Pillow
+PyMuPDF
+pandas
