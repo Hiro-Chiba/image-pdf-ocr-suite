@@ -80,12 +80,20 @@ VITE_API_URL=http://localhost:8000/convert
 
 Vercel ではフロントエンド（`frontend` ディレクトリ配下）を静的サイトとしてホスティングできます。リポジトリルートには `vercel.json` を配置しており、以下の設定で Vite ビルド成果物を公開します。
 
-- インストールコマンド: `cd frontend && npm install`
-- ビルドコマンド: `cd frontend && npm run build`
+- ビルドターゲット: `frontend/package.json` を `@vercel/static-build` で処理
+- インストールコマンド: `npm install --prefix frontend`
+- ビルドコマンド: `npm run build --prefix frontend`
 - 出力ディレクトリ: `frontend/dist`
 - SPA 用のルーティング: すべてのリクエストを `index.html` へフォールバック
 
 > **デプロイ後に Vercel の 404 ページが表示される場合**: Vercel のビルド成果物検出に失敗している可能性があります。その際は、`vercel.json` の `outputDirectory` が `frontend/dist` になっているか確認してください（初期状態では設定済みです）。他の値になっていると、ビルド成果物を見つけられず 404 になります。
+>
+> **"No FastAPI entrypoint found" と表示される場合**: Vercel の自動検出が Python プロジェクトと誤認しています。新規プロジェクト作成時に以下を必ず設定してください。
+>
+> - 「Framework preset」を **Other**（もしくは Vite）に変更し、サーバーレス（Python）プリセットを選ばない。
+> - 「Root Directory」を `frontend` に変更する。Git 連携後に `Edit` から変更可能です。
+> - 変更後に再デプロイすると、`vercel.json` の設定に基づいて静的サイトとしてビルドされます。
+> - CLI でデプロイする場合は `vercel --cwd frontend`（本番は `vercel --cwd frontend --prod`）を使用すると、同様にフロントエンドだけが対象になります。
 
 > **重要**: 本プロジェクトのバックエンド（FastAPI + Tesseract OCR）は Vercel 上ではそのまま動作しません。Tesseract や Poppler などのネイティブ依存関係を含むため、Vercel とは別の環境（例: Cloud Run、Render、VPS など）にデプロイし、`VITE_API_URL` をそのバックエンドの公開URLに向けてください。また、Vercel の自動検出で Python プロジェクトと誤認されないよう、リポジトリ直下に `.vercelignore` を配置してバックエンド関連ファイルをアップロード対象から除外しています。
 
@@ -93,9 +101,10 @@ Vercel ではフロントエンド（`frontend` ディレクトリ配下）を�
 
 1. バックエンドを任意のサーバーにデプロイし、HTTPS で公開する。
 2. Vercel のダッシュボードで新規プロジェクトを作成し、本リポジトリを接続する。
-3. 「Environment Variables」に `VITE_API_URL` を追加し、手順1で公開したバックエンドの `/convert` エンドポイントを指定する。
-4. ルートディレクトリの確認: `vercel.json` により自動的に `frontend` がビルド対象となるため、追加設定は不要。
-5. デプロイ後、フロントエンドが公開され、OCR 変換リクエストは外部バックエンドへ転送される。
+3. 「Root Directory」を `frontend` に変更し、「Framework preset」を **Other** または **Vite** に設定する。
+4. 「Environment Variables」に `VITE_API_URL` を追加し、手順1で公開したバックエンドの `/convert` エンドポイントを指定する。
+5. 保存後にデプロイを開始すると、`vercel.json` の設定に従って `frontend/dist` が公開される。
+6. CLI デプロイの場合は `vercel --cwd frontend --prod` を使用すると同じ構成になります。
 
 ## CLIスクリプトとしての利用
 
