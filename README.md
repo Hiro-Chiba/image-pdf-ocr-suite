@@ -62,11 +62,37 @@ npm run dev -- --host 0.0.0.0 --port 5173
 
 ### 環境変数
 
-バックエンドのURLを変更する場合は、`frontend/.env` に以下のように設定できます。
+バックエンドのURLを変更する場合は、`frontend/.env` に以下のように設定できます。`.env` を直接編集せず、まずは同ディレクトリに用意した `.env.example` をコピーしてください。
+
+```
+cp frontend/.env.example frontend/.env
+```
+
+`frontend/.env` 内の `VITE_API_URL` を、デプロイ先のバックエンドURLに合わせて編集します。
 
 ```
 VITE_API_URL=http://localhost:8000/convert
 ```
+
+> **補足**: Vercel でホスティングする場合、フロントエンドから参照できる公開URLを `VITE_API_URL` に設定する必要があります。Vercel のプロジェクト設定で環境変数を追加すると、ビルド時に反映されます。
+
+## Vercel へのデプロイ
+
+Vercel ではフロントエンド（`frontend` ディレクトリ配下）を静的サイトとしてホスティングできます。リポジトリルートには `vercel.json` を配置しており、以下の設定で Vite ビルド成果物を公開します。
+
+- ビルドコマンド: `npm install && npm run build`
+- 出力ディレクトリ: `frontend/dist`
+- SPA 用のルーティング: すべてのリクエストを `index.html` へフォールバック
+
+> **重要**: 本プロジェクトのバックエンド（FastAPI + Tesseract OCR）は Vercel 上ではそのまま動作しません。Tesseract や Poppler などのネイティブ依存関係を含むため、Vercel とは別の環境（例: Cloud Run、Render、VPS など）にデプロイし、`VITE_API_URL` をそのバックエンドの公開URLに向けてください。
+
+### 手順サマリー
+
+1. バックエンドを任意のサーバーにデプロイし、HTTPS で公開する。
+2. Vercel のダッシュボードで新規プロジェクトを作成し、本リポジトリを接続する。
+3. 「Environment Variables」に `VITE_API_URL` を追加し、手順1で公開したバックエンドの `/convert` エンドポイントを指定する。
+4. ルートディレクトリの確認: `vercel.json` により自動的に `frontend` がビルド対象となるため、追加設定は不要。
+5. デプロイ後、フロントエンドが公開され、OCR 変換リクエストは外部バックエンドへ転送される。
 
 ## CLIスクリプトとしての利用
 
