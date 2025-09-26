@@ -1,4 +1,7 @@
-﻿pytesseract
+pytesseract
 Pillow
 PyMuPDF
 pandas
+fastapi
+uvicorn[standard]
+python-multipart
