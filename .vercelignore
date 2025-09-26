@@ -1,0 +1,7 @@
+# Vercel にアップロードする際にバックエンド関連ファイルを除外し、FastAPI プロジェクトと誤認されるのを防ぐ
+backend/
+image_pdf_ocr/
+convert_to_searchable_pdf.py
+extract_text_from_pdf.py
+requirements.txt
+implementation_checklist.md

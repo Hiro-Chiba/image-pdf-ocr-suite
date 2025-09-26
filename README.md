@@ -87,7 +87,7 @@ Vercel ではフロントエンド（`frontend` ディレクトリ配下）を�
 
 > **デプロイ後に Vercel の 404 ページが表示される場合**: Vercel のビルド成果物検出に失敗している可能性があります。その際は、`vercel.json` の `outputDirectory` が `frontend/dist` になっているか確認してください（初期状態では設定済みです）。他の値になっていると、ビルド成果物を見つけられず 404 になります。
 
-> **重要**: 本プロジェクトのバックエンド（FastAPI + Tesseract OCR）は Vercel 上ではそのまま動作しません。Tesseract や Poppler などのネイティブ依存関係を含むため、Vercel とは別の環境（例: Cloud Run、Render、VPS など）にデプロイし、`VITE_API_URL` をそのバックエンドの公開URLに向けてください。
+> **重要**: 本プロジェクトのバックエンド（FastAPI + Tesseract OCR）は Vercel 上ではそのまま動作しません。Tesseract や Poppler などのネイティブ依存関係を含むため、Vercel とは別の環境（例: Cloud Run、Render、VPS など）にデプロイし、`VITE_API_URL` をそのバックエンドの公開URLに向けてください。また、Vercel の自動検出で Python プロジェクトと誤認されないよう、リポジトリ直下に `.vercelignore` を配置してバックエンド関連ファイルをアップロード対象から除外しています。
 
 ### 手順サマリー
 
