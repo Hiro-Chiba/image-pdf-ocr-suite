@@ -80,13 +80,12 @@ VITE_API_URL=http://localhost:8000/convert
 
 Vercel ではフロントエンド（`frontend` ディレクトリ配下）を静的サイトとしてホスティングできます。リポジトリルートには `vercel.json` を配置しており、以下の設定で Vite ビルド成果物を公開します。
 
-- ビルドコマンド: `npm install && npm run build`
+- インストールコマンド: `cd frontend && npm install`
+- ビルドコマンド: `cd frontend && npm run build`
 - 出力ディレクトリ: `frontend/dist`
 - SPA 用のルーティング: すべてのリクエストを `index.html` へフォールバック
 
-> **デプロイ後に Vercel の 404 ページが表示される場合**: Vercel のビルド成果物検出に失敗している可能性があります。その際は、`vercel.json` の
-> `distDir` が `frontend/dist` になっているか確認してください（初期状態では設定済みです）。他の値になっていると、ビルド成果物を見つけられず
-> 404 になります。
+> **デプロイ後に Vercel の 404 ページが表示される場合**: Vercel のビルド成果物検出に失敗している可能性があります。その際は、`vercel.json` の `outputDirectory` が `frontend/dist` になっているか確認してください（初期状態では設定済みです）。他の値になっていると、ビルド成果物を見つけられず 404 になります。
 
 > **重要**: 本プロジェクトのバックエンド（FastAPI + Tesseract OCR）は Vercel 上ではそのまま動作しません。Tesseract や Poppler などのネイティブ依存関係を含むため、Vercel とは別の環境（例: Cloud Run、Render、VPS など）にデプロイし、`VITE_API_URL` をそのバックエンドの公開URLに向けてください。
 
