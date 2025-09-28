@@ -6,6 +6,7 @@ import io
 import math
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Tuple, Union
@@ -153,6 +154,41 @@ def _extract_coordinates(row: pd.Series) -> Tuple[float | None, float | None, fl
         return None, None, None
 
     return x, y, h
+
+
+def _format_duration(seconds: float) -> str:
+    """秒数から可読な時間文字列を生成する。"""
+
+    if not math.isfinite(seconds):
+        return "不明"
+
+    total_seconds = max(0, int(round(seconds)))
+    minutes, sec = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{sec:02d}"
+    return f"{minutes:02d}:{sec:02d}"
+
+
+def _print_progress(current: int, total: int, start_time: float) -> None:
+    """進捗と推定残り時間を表示する。"""
+
+    if total <= 0:
+        print("=== 進捗: ページ数が不明です", flush=True)
+        return
+
+    elapsed = time.perf_counter() - start_time
+    average_per_page = elapsed / current if current else float("inf")
+    remaining_pages = max(total - current, 0)
+    remaining_estimate = average_per_page * remaining_pages
+    percent = (current / total) * 100
+    remaining_text = _format_duration(remaining_estimate)
+
+    print(
+        f"=== {current}/{total} ページ完了 ({percent:5.1f}%) 残り推定時間: {remaining_text}",
+        flush=True,
+    )
 
 
 def _find_japanese_font_path() -> Path:
@@ -369,8 +405,14 @@ def create_searchable_pdf(
 
     output_doc = fitz.open()
 
+    total_pages = input_doc.page_count
+    start_time = time.perf_counter()
+
+    if total_pages == 0:
+        print("=== ページが存在しないPDFです。処理を終了します。", flush=True)
+
     try:
-        for page in input_doc:
+        for index, page in enumerate(input_doc, start=1):
             pix = page.get_pixmap(dpi=300)
             image_bytes = io.BytesIO(pix.tobytes("png"))
             with Image.open(image_bytes) as pil_image:
@@ -401,6 +443,8 @@ def create_searchable_pdf(
                 except RuntimeError:
                     # PyMuPDFのフォント描画で稀に失敗するケースがあるため無視
                     continue
+
+            _print_progress(index, total_pages, start_time)
     except Exception as exc:
         raise OCRConversionError(f"ページ処理中に問題が発生しました: {exc}") from exc
     finally:
