@@ -7,6 +7,8 @@ from .ocr import (
     find_and_set_tesseract_path,
     OCRCancelledError,
     OCRConversionError,
+    PDFPasswordRemovalError,
+    remove_pdf_password,
 )
 
 __all__ = [
@@ -16,4 +18,6 @@ __all__ = [
     "find_and_set_tesseract_path",
     "OCRCancelledError",
     "OCRConversionError",
+    "PDFPasswordRemovalError",
+    "remove_pdf_password",
 ]
