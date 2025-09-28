@@ -25,6 +25,10 @@ class OCRConversionError(RuntimeError):
 
 class OCRCancelledError(RuntimeError):
     """ユーザーによって処理がキャンセルされたことを示す例外。"""
+
+
+class PDFPasswordRemovalError(RuntimeError):
+    """PDFのパスワード解除に失敗したことを示す例外。"""
 _AVERAGE_CONFIDENCE_THRESHOLD = float(os.environ.get("OCR_CONFIDENCE_THRESHOLD", "65"))
 _TEXT_RENDER_CONFIDENCE_THRESHOLD = 50.0
 _UPSCALE_FACTOR = 1.5
@@ -189,6 +193,52 @@ def _build_progress_message(current: int, total: int, start_time: float) -> str:
     remaining_text = _format_duration(remaining_estimate)
 
     return f"{current}/{total}ページ完了　残り推定時間: {remaining_text}"
+
+
+def remove_pdf_password(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    password: str,
+) -> None:
+    """パスワード保護されたPDFからパスワードを解除して保存する。
+
+    Args:
+        input_path: 入力となるパスワード付きPDFファイルのパス。
+        output_path: パスワードを解除したPDFを書き出すパス。
+        password: PDFを開くためのパスワード。
+
+    Raises:
+        FileNotFoundError: 入力ファイルが存在しない場合。
+        ValueError: 入力ファイルと出力ファイルのパスが同一の場合。
+        PDFPasswordRemovalError: パスワード解除に失敗した場合。
+    """
+
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+
+    if not input_path.exists():
+        raise FileNotFoundError(f"入力PDFが見つかりません: {input_path}")
+
+    if input_path.resolve() == output_path.resolve():
+        raise ValueError("入力と同じ場所には保存できません。保存先を変更してください。")
+
+    with fitz.open(str(input_path)) as doc:  # type: ignore[arg-type]
+        if not doc.is_encrypted:
+            raise PDFPasswordRemovalError("指定されたPDFはパスワードで保護されていません。")
+
+        if not password:
+            raise PDFPasswordRemovalError("パスワードを入力してください。")
+
+        if not doc.authenticate(password):
+            raise PDFPasswordRemovalError("パスワードが正しくありません。")
+
+        if output_path.parent and not output_path.parent.exists():
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            doc.save(str(output_path), encryption=fitz.PDF_ENCRYPT_NONE)
+        except RuntimeError as exc:
+            raise PDFPasswordRemovalError(f"PDFの保存に失敗しました: {exc}") from exc
 
 
 def _find_japanese_font_path() -> Path:
