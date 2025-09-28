@@ -33,7 +33,7 @@ image-pdf-ocr-suite/
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windowsでは .venv\\Scripts\\activate
+source .venv/bin/activate  # Windowsでは .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -72,7 +72,7 @@ PyInstallerを使うと、GUIアプリを単一の`.exe`としてまとめて配
    ```
    - `dist/ImagePdfOcr.exe` が生成されます。任意で `--icon` オプションを追加すればアイコンも設定できます。
 3. ユーザー環境でTesseractを別途インストールせずに動かす場合は、`tesseract.exe` と `tessdata` 一式を同梱します。
-   - 例: `C:\Program Files\Tesseract-OCR` を丸ごと `dist` 配下にコピーし、`dist/Tesseract-OCR/tesseract.exe` が存在する状態にします。
+   - 例: `C:\ Program Files\Tesseract-OCR` を丸ごと `dist` 配下にコピーし、`dist/Tesseract-OCR/tesseract.exe` が存在する状態にします。
    - 本アプリは実行ファイルと同じフォルダ、もしくは `Tesseract-OCR` フォルダ内の `tesseract.exe` を自動検出します。
 4. `dist` フォルダをZIP化して配布すれば、他のユーザーは解凍後に `ImagePdfOcr.exe` を実行するだけで利用できます。
 
@@ -110,3 +110,8 @@ python extract_text_from_pdf.py --pdf_path "入力PDFのパス" --output_path "�
 ## ライセンス
 
 本プロジェクトは [MIT License](LICENSE) の下で提供されます。
+
+## スクリーンショット
+
+![Screenshot 1](./images/スクリーンショット 2025-09-28 165921.png)
+![Screenshot 2](./images/スクリーンショット 2025-09-28 165929.png)
