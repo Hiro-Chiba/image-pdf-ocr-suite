@@ -57,39 +57,6 @@ pip install -r requirements.txt
    - 入力PDFと同じファイルには保存できないため、別パスを指定してください。
    - パスワードが誤っている場合や解除済みのPDFを指定した場合はエラーメッセージが表示されます。
 
-## Windowsでのデスクトップアプリ配布手順
-
-PyInstallerを使うと、GUIアプリを単一の`.exe`としてまとめて配布できます。以下は最小構成の例です。
-
-1. 事前に仮想環境を作成し、このリポジトリの依存関係と `pyinstaller` をインストールします。
-   ```bash
-   pip install -r requirements.txt
-   pip install pyinstaller
-   ```
-2. プロジェクトルートで次のコマンドを実行し、実行ファイルを生成します。
-   ```bash
-   pyinstaller ocr_desktop_app.py --onefile --noconsole --name ImagePdfOcr
-   ```
-   - `dist/ImagePdfOcr.exe` が生成されます。任意で `--icon` オプションを追加すればアイコンも設定できます。
-3. ユーザー環境でTesseractを別途インストールせずに動かす場合は、`tesseract.exe` と `tessdata` 一式を同梱します。
-   - 例: `C:\ Program Files\Tesseract-OCR` を丸ごと `dist` 配下にコピーし、`dist/Tesseract-OCR/tesseract.exe` が存在する状態にします。
-   - 本アプリは実行ファイルと同じフォルダ、もしくは `Tesseract-OCR` フォルダ内の `tesseract.exe` を自動検出します。
-4. `dist` フォルダをZIP化して配布すれば、他のユーザーは解凍後に `ImagePdfOcr.exe` を実行するだけで利用できます。
-
-## CLIスクリプトの利用
-
-### 検索可能PDFの作成
-
-```bash
-python convert_to_searchable_pdf.py --input_path "入力PDFのパス" --output_path "出力PDFのパス"
-```
-
-### テキストの抽出
-
-```bash
-python extract_text_from_pdf.py --pdf_path "入力PDFのパス" --output_path "保存するテキストファイルのパス"
-```
-
 ## トラブルシューティング
 
 - `Tesseract-OCRが見つかりません。インストールとPATH設定を確認してください。`
