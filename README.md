@@ -113,5 +113,5 @@ python extract_text_from_pdf.py --pdf_path "入力PDFのパス" --output_path "�
 
 ## スクリーンショット
 
-![Screenshot 1](./images/スクリーンショット 2025-09-28 165921.png)
-![Screenshot 2](./images/スクリーンショット 2025-09-28 165929.png)
+![Screenshot 1](./images/screenshot-1.png)
+![Screenshot 2](./images/screenshot-2.png)
