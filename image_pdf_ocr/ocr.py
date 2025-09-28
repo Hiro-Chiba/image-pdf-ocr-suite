@@ -183,17 +183,7 @@ def _build_progress_message(current: int, total: int, start_time: float) -> str:
     remaining_estimate = average_per_page * remaining_pages
     remaining_text = _format_duration(remaining_estimate)
 
-    bar_length = 20
-    progress_ratio = current / total if total else 0.0
-    filled = int(progress_ratio * bar_length)
-    if current >= total:
-        filled = bar_length
-    elif current > 0 and filled == 0:
-        filled = 1
-    filled = min(filled, bar_length)
-    bar = "=" * filled + "." * (bar_length - filled)
-
-    return f"{current}/{total}ページ完了　残り推定時間: {remaining_text}\n[{bar}]"
+    return f"{current}/{total}ページ完了　残り推定時間: {remaining_text}"
 
 
 def _find_japanese_font_path() -> Path:
@@ -472,7 +462,10 @@ def create_searchable_pdf(
         output_doc.close()
 
 
-def extract_text_from_image_pdf(input_path: Union[str, os.PathLike]) -> str:
+def extract_text_from_image_pdf(
+    input_path: Union[str, os.PathLike],
+    progress_callback: Callable[[str], None] | None = None,
+) -> str:
     """画像ベースのPDFからOCRでテキストを抽出して返す。"""
 
     if not find_and_set_tesseract_path():
@@ -490,6 +483,19 @@ def extract_text_from_image_pdf(input_path: Union[str, os.PathLike]) -> str:
         raise OCRConversionError(f"PDFファイルを開けませんでした: {exc}") from exc
 
     texts: list[str] = []
+    total_pages = document.page_count
+    start_time = time.perf_counter()
+
+    def _dispatch_progress(message: str) -> None:
+        if progress_callback:
+            progress_callback(message)
+        else:
+            print(message, flush=True)
+
+    if total_pages == 0:
+        _dispatch_progress("ページが存在しないPDFです。処理を終了します。")
+        document.close()
+        return "\n"
     try:
         for index, page in enumerate(document, start=1):
             pix = page.get_pixmap(dpi=300)
@@ -498,6 +504,9 @@ def extract_text_from_image_pdf(input_path: Union[str, os.PathLike]) -> str:
                 ocr_result = _perform_adaptive_ocr(pil_image)
                 page_text = pytesseract.image_to_string(ocr_result.image_for_string, lang="jpn")
             texts.append(f"--- ページ {index} ---\n{page_text.strip()}\n")
+
+            message = _build_progress_message(index, total_pages, start_time)
+            _dispatch_progress(message)
     except Exception as exc:
         raise OCRConversionError(f"テキスト抽出中に問題が発生しました: {exc}") from exc
     finally:
@@ -507,10 +516,14 @@ def extract_text_from_image_pdf(input_path: Union[str, os.PathLike]) -> str:
 
 
 def extract_text_to_file(
-    input_path: Union[str, os.PathLike], output_path: Union[str, os.PathLike]
+    input_path: Union[str, os.PathLike],
+    output_path: Union[str, os.PathLike],
+    progress_callback: Callable[[str], None] | None = None,
 ) -> None:
     """画像PDFから抽出したテキストをファイルに保存する。"""
 
-    text = extract_text_from_image_pdf(input_path)
+    text = extract_text_from_image_pdf(
+        input_path, progress_callback=progress_callback
+    )
     output_path = Path(output_path)
     output_path.write_text(text, encoding="utf-8")

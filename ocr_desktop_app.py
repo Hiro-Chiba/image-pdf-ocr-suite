@@ -217,7 +217,11 @@ class OCRDesktopApp:
     def _extract_task(self, input_path: Path, output_path: Path) -> None:
         self._log(f"テキストを抽出中: {output_path}")
         try:
-            extract_text_to_file(input_path, output_path)
+            extract_text_to_file(
+                input_path,
+                output_path,
+                progress_callback=self._log,
+            )
         except (FileNotFoundError, OCRConversionError) as exc:
             message = str(exc)
             self._log(f"エラー: {message}")
