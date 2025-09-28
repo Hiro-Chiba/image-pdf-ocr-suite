@@ -35,17 +35,31 @@ class ProcessingWorkspace:
         self.convert_btn: tk.Button | None = None
         self.extract_btn: tk.Button | None = None
         self.cancel_btn: tk.Button | None = None
+        self.clear_btn: tk.Button | None = None
         self.log_widget: ScrolledText | None = None
         self.progress: ttk.Progressbar | None = None
 
         self._worker: threading.Thread | None = None
         self._cancel_event: threading.Event | None = None
+        self._last_auto_pdf_path: Path | None = None
+        self._last_auto_text_path: Path | None = None
 
         self._create_widgets()
 
     # --- ライフサイクル -------------------------------------------------
     def pack(self, *, side: str, padx: tuple[int, int], pady: tuple[int, int]) -> None:
         self.frame.pack(side=side, fill=tk.BOTH, expand=True, padx=padx, pady=pady)
+
+    def grid(
+        self,
+        *,
+        row: int,
+        column: int,
+        padx: tuple[int, int],
+        pady: tuple[int, int],
+        sticky: str,
+    ) -> None:
+        self.frame.grid(row=row, column=column, padx=padx, pady=pady, sticky=sticky)
 
     def prepare_for_destroy(self) -> None:
         self._cancel_running_task()
@@ -115,8 +129,13 @@ class ProcessingWorkspace:
         )
         self.cancel_btn.pack(side=tk.LEFT, padx=6)
 
-        clear_btn = tk.Button(button_frame, text="ログをクリア", command=self._clear_log)
-        clear_btn.pack(side=tk.LEFT, padx=6)
+        clear_log_btn = tk.Button(button_frame, text="ログをクリア", command=self._clear_log)
+        clear_log_btn.pack(side=tk.LEFT, padx=6)
+
+        self.clear_btn = tk.Button(
+            button_frame, text="画面をクリア", command=self._clear_workspace
+        )
+        self.clear_btn.pack(side=tk.LEFT, padx=6)
 
         self.log_widget = ScrolledText(self.frame, height=16, state=tk.DISABLED)
         self.log_widget.pack(fill=tk.BOTH, expand=True, padx=12, pady=(12, 6))
@@ -154,6 +173,7 @@ class ProcessingWorkspace:
         )
         if file_path:
             self.output_pdf_path.set(file_path)
+            self._last_auto_pdf_path = None
 
     def _select_output_text(self) -> None:
         current = self.output_text_path.get()
@@ -169,6 +189,7 @@ class ProcessingWorkspace:
         )
         if file_path:
             self.output_text_path.set(file_path)
+            self._last_auto_text_path = None
 
     # --- バリデーション -------------------------------------------------
     def _validate_input(self) -> Path | None:
@@ -195,11 +216,16 @@ class ProcessingWorkspace:
         self._worker.start()
 
     def _set_busy(self, busy: bool) -> None:
-        if self.convert_btn and self.extract_btn and self.cancel_btn and self.progress:
-            state = tk.DISABLED if busy else tk.NORMAL
+        state = tk.DISABLED if busy else tk.NORMAL
+
+        if self.convert_btn and self.extract_btn:
             self.convert_btn.configure(state=state)
             self.extract_btn.configure(state=state)
+        if self.cancel_btn:
             self.cancel_btn.configure(state=tk.NORMAL if busy else tk.DISABLED)
+        if self.clear_btn:
+            self.clear_btn.configure(state=state)
+        if self.progress:
             if busy:
                 self.progress.start(10)
             else:
@@ -355,10 +381,21 @@ class ProcessingWorkspace:
     def _suggest_output_paths(self, input_path: Path) -> None:
         stem = input_path.stem
         parent = input_path.parent
-        if not self.output_pdf_path.get():
-            self.output_pdf_path.set(str(parent / f"{stem}_searchable.pdf"))
-        if not self.output_text_path.get():
-            self.output_text_path.set(str(parent / f"{stem}_text.txt"))
+        suggested_pdf = parent / f"{stem}_searchable.pdf"
+        current_pdf = self.output_pdf_path.get()
+        if not current_pdf or current_pdf == str(self._last_auto_pdf_path):
+            self.output_pdf_path.set(str(suggested_pdf))
+            self._last_auto_pdf_path = suggested_pdf
+        else:
+            self._last_auto_pdf_path = None
+
+        suggested_text = parent / f"{stem}_text.txt"
+        current_text = self.output_text_path.get()
+        if not current_text or current_text == str(self._last_auto_text_path):
+            self.output_text_path.set(str(suggested_text))
+            self._last_auto_text_path = suggested_text
+        else:
+            self._last_auto_text_path = None
 
     def _notify(self, callback: Callable[[], None]) -> None:
         def safe_callback() -> None:
@@ -398,6 +435,17 @@ class ProcessingWorkspace:
         self.log_widget.delete("1.0", tk.END)
         self.log_widget.configure(state=tk.DISABLED)
 
+    def _clear_workspace(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        self.input_path.set("")
+        self.output_pdf_path.set("")
+        self.output_text_path.set("")
+        self.status_var.set("準備完了")
+        self._last_auto_pdf_path = None
+        self._last_auto_text_path = None
+        self._clear_log()
+
 
 class PDFPasswordRemovalWorkspace:
     """PDFのパスワード解除画面を構築・管理する。"""
@@ -412,6 +460,7 @@ class PDFPasswordRemovalWorkspace:
         self.status_var = tk.StringVar(value="準備完了")
 
         self.remove_btn: tk.Button | None = None
+        self.clear_btn: tk.Button | None = None
         self.progress: ttk.Progressbar | None = None
 
         self._worker: threading.Thread | None = None
@@ -460,6 +509,11 @@ class PDFPasswordRemovalWorkspace:
             button_frame, text="パスワードを解除", command=self._start_removal
         )
         self.remove_btn.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.clear_btn = tk.Button(
+            button_frame, text="画面をクリア", command=self._clear_workspace
+        )
+        self.clear_btn.pack(side=tk.LEFT, padx=6)
 
         status_frame = tk.Frame(self.frame)
         status_frame.pack(fill=tk.X, padx=12, pady=(12, 12))
@@ -564,14 +618,16 @@ class PDFPasswordRemovalWorkspace:
         self._update_status("エラーが発生しました。内容を確認してください。")
 
     def _set_busy(self, busy: bool) -> None:
-        if not self.remove_btn or not self.progress:
-            return
         state = tk.DISABLED if busy else tk.NORMAL
-        self.remove_btn.configure(state=state)
-        if busy:
-            self.progress.start(10)
-        else:
-            self.progress.stop()
+        if self.remove_btn:
+            self.remove_btn.configure(state=state)
+        if self.clear_btn:
+            self.clear_btn.configure(state=state)
+        if self.progress:
+            if busy:
+                self.progress.start(10)
+            else:
+                self.progress.stop()
 
     def _update_status(self, message: str) -> None:
         self.status_var.set(message)
@@ -590,6 +646,14 @@ class PDFPasswordRemovalWorkspace:
         if not self.output_path.get():
             self.output_path.set(str(input_path.with_name(f"{input_path.stem}_unlocked.pdf")))
 
+    def _clear_workspace(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        self.input_path.set("")
+        self.output_path.set("")
+        self.password.set("")
+        self.status_var.set("準備完了")
+
 
 class OCRDesktopApp:
     """画像PDFを処理する簡易デスクトップアプリケーション。"""
@@ -598,11 +662,20 @@ class OCRDesktopApp:
         self.master = master
         self.master.title("Image PDF OCR Suite")
         self.single_geometry = "720x520"
-        self.double_geometry = "1420x520"
+        self.geometry_map: dict[int, str] = {
+            1: self.single_geometry,
+            2: "1420x520",
+            4: "1420x980",
+        }
         self.master.geometry(self.single_geometry)
 
         self.master.report_callback_exception = self._handle_ui_exception
 
+        self.mode_options: dict[str, int] = {
+            "1つの作業": 1,
+            "2つの作業": 2,
+            "4つの作業": 4,
+        }
         self.mode_var = tk.StringVar(value="1つの作業")
         self.workspaces: list[ProcessingWorkspace] = []
         self.current_workspace_count = 1
@@ -631,7 +704,7 @@ class OCRDesktopApp:
         mode_combo = ttk.Combobox(
             control_frame,
             state="readonly",
-            values=("1つの作業", "2つの作業"),
+            values=tuple(self.mode_options.keys()),
             width=15,
             textvariable=self.mode_var,
         )
@@ -652,7 +725,7 @@ class OCRDesktopApp:
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
     def _on_mode_change(self) -> None:
-        count = 2 if self.mode_var.get().startswith("2") else 1
+        count = self.mode_options.get(self.mode_var.get(), 1)
         self._rebuild_workspaces(count)
 
     def _rebuild_workspaces(self, count: int) -> None:
@@ -668,16 +741,30 @@ class OCRDesktopApp:
         if self._is_ocr_tab_selected():
             self._apply_geometry(count)
 
-        for index in range(count):
-            workspace = ProcessingWorkspace(self, self.workspace_container)
-            pad_left = 12 if index == 0 else 6
-            pad_right = 12 if index == count - 1 else 6
-            workspace.pack(side=tk.LEFT, padx=(pad_left, pad_right), pady=(12, 12))
-            self.workspaces.append(workspace)
+        positions = self._resolve_layout_positions(count)
+        if not positions:
+            return
 
-            if count == 2 and index == 0:
-                separator = ttk.Separator(self.workspace_container, orient=tk.VERTICAL)
-                separator.pack(side=tk.LEFT, fill=tk.Y)
+        max_row = max(row for row, _col in positions)
+        max_col = max(col for _row, col in positions)
+
+        for row in range(max_row + 1):
+            self.workspace_container.grid_rowconfigure(row, weight=1)
+        for col in range(max_col + 1):
+            self.workspace_container.grid_columnconfigure(col, weight=1)
+
+        for row, col in positions:
+            workspace = ProcessingWorkspace(self, self.workspace_container)
+            padx = (
+                12 if col == 0 else 6,
+                12 if col == max_col else 6,
+            )
+            pady = (
+                12 if row == 0 else 6,
+                12 if row == max_row else 6,
+            )
+            workspace.grid(row=row, column=col, padx=padx, pady=pady, sticky="nsew")
+            self.workspaces.append(workspace)
 
     def _handle_ui_exception(self, exc_type, exc_value, exc_traceback) -> None:  # type: ignore[override]
         message = f"UIエラー: {exc_value}"
@@ -693,15 +780,27 @@ class OCRDesktopApp:
             self.master.geometry(self.single_geometry)
 
     def _apply_geometry(self, count: int) -> None:
-        if count >= 2:
-            self.master.geometry(self.double_geometry)
-        else:
-            self.master.geometry(self.single_geometry)
+        if count in self.geometry_map:
+            self.master.geometry(self.geometry_map[count])
+            return
+
+        max_key = max(self.geometry_map)
+        self.master.geometry(self.geometry_map[max_key])
 
     def _is_ocr_tab_selected(self) -> bool:
         if not self.notebook or not self.ocr_tab:
             return True
         return self.notebook.select() == str(self.ocr_tab)
+
+    def _resolve_layout_positions(self, count: int) -> list[tuple[int, int]]:
+        if count <= 1:
+            return [(0, 0)]
+        if count == 2:
+            return [(0, 0), (0, 1)]
+        if count == 4:
+            return [(0, 0), (0, 1), (1, 0), (1, 1)]
+
+        return [(0, index) for index in range(count)]
 
 
 def main() -> None:
