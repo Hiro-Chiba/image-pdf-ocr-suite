@@ -192,7 +192,11 @@ class OCRDesktopApp:
     def _convert_task(self, input_path: Path, output_path: Path) -> None:
         self._log(f"検索可能PDFを生成中: {output_path}")
         try:
-            create_searchable_pdf(input_path, output_path)
+            create_searchable_pdf(
+                input_path,
+                output_path,
+                progress_callback=self._log,
+            )
         except (FileNotFoundError, OCRConversionError) as exc:
             message = str(exc)
             self._log(f"エラー: {message}")
