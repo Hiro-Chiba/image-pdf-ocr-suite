@@ -194,8 +194,9 @@ class OCRDesktopApp:
         try:
             create_searchable_pdf(input_path, output_path)
         except (FileNotFoundError, OCRConversionError) as exc:
-            self._log(f"エラー: {exc}")
-            self._notify(lambda: self._show_error(str(exc)))
+            message = str(exc)
+            self._log(f"エラー: {message}")
+            self._notify(lambda msg=message: self._show_error(msg))
         except Exception as exc:  # 予期しない例外
             self._log(f"予期しないエラー: {exc}")
             self._notify(lambda: self._show_error("変換に失敗しました。詳細はログを参照してください。"))
@@ -214,8 +215,9 @@ class OCRDesktopApp:
         try:
             extract_text_to_file(input_path, output_path)
         except (FileNotFoundError, OCRConversionError) as exc:
-            self._log(f"エラー: {exc}")
-            self._notify(lambda: self._show_error(str(exc)))
+            message = str(exc)
+            self._log(f"エラー: {message}")
+            self._notify(lambda msg=message: self._show_error(msg))
         except Exception as exc:
             self._log(f"予期しないエラー: {exc}")
             self._notify(lambda: self._show_error("テキスト抽出に失敗しました。詳細はログを参照してください。"))
