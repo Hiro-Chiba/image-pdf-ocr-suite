@@ -1,37 +1,32 @@
 # Image PDF OCR Suite
 
-画像ベースのPDFにOCR処理を施し、検索可能なPDFへ変換するためのフルスタックアプリケーションです。FastAPIバックエンドでOCR変換を行い、Reactフロントエンドからアップロード・プレビュー・ダウンロードをシームレスに実行できます。
+画像ベースのPDFをOCR処理し、検索可能なPDFを生成したり、テキストを抽出したりできるPythonアプリケーションです。Tkinterを用いたデスクトップUIと、既存のCLIスクリプトのみで構成されています。
 
-## 機能概要
+## 主な機能
 
-- 画像ベースPDFをアップロードしてOCR変換
-- 変換後PDFのブラウザプレビューとダウンロード
-- FastAPIによるREST API `/convert`
-- React（Vite）による単一ページUI
+- 画像ベースPDFを検索可能なPDFへ変換
+- 画像ベースPDFからテキストを抽出してテキストファイルとして保存
+- GUI（Tkinter）またはCLIから処理を実行可能
 
-## システム構成
+## ディレクトリ構成
 
 ```
 image-pdf-ocr-suite/
-├── backend/          # FastAPI アプリケーション
-├── frontend/         # React + Vite フロントエンド
-├── image_pdf_ocr/    # OCRロジックをまとめたPythonモジュール
-├── convert_to_searchable_pdf.py  # CLIスクリプト
-├── extract_text_from_pdf.py      # 既存のテキスト抽出スクリプト
+├── image_pdf_ocr/              # OCRロジックをまとめたPythonモジュール
+├── ocr_desktop_app.py          # Tkinterデスクトップアプリ
+├── convert_to_searchable_pdf.py# PDF変換用CLI
+├── extract_text_from_pdf.py    # テキスト抽出用CLI
 └── requirements.txt
 ```
 
 ## 前提条件
 
 - Python 3.10 以上
-- Node.js 18 以上
 - Tesseract-OCR（日本語データを含む）
-  - [UB Mannheim版インストーラー](https://github.com/UB-Mannheim/tesseract/wiki)を利用すると便利です。
-  - インストール時に `Additional language data` → `Japanese` を選択し、可能ならシステムPATHへ追加してください。
+  - [UB Mannheim版インストーラー](https://github.com/UB-Mannheim/tesseract/wiki)が便利です。
+  - インストール時に `Additional language data` → `Japanese` を選択し、可能であればシステムPATHへ追加してください。
 
-## セットアップ手順
-
-### 1. Python依存関係のインストール
+## セットアップ
 
 ```bash
 python -m venv .venv
@@ -39,74 +34,27 @@ source .venv/bin/activate  # Windowsでは .venv\\Scripts\\activate
 pip install -r requirements.txt
 ```
 
-### 2. バックエンドの起動
+## Tkinterデスクトップアプリの利用方法
 
-```bash
-cd backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
+1. `python ocr_desktop_app.py` を実行します。
+2. 「入力PDF」でOCR対象のPDFを選択します。
+3. 変換後PDFの保存先や抽出テキストの保存先を必要に応じて指定します（初期値は自動生成されます）。
+4. 「検索可能PDFを作成」または「テキストを抽出」ボタンを押すと処理が開始されます。
+5. 下部のログペインに進捗やエラーが表示され、処理完了時はダイアログでも通知されます。
 
-- `http://localhost:8000/docs` にアクセスするとAPIドキュメント（Swagger UI）を確認できます。
+## CLIスクリプトの利用
 
-### 3. フロントエンドのセットアップ・起動
-
-別ターミナルで以下を実行します。
-
-```bash
-cd frontend
-npm install
-npm run dev -- --host 0.0.0.0 --port 5173
-```
-
-ブラウザで `http://localhost:5173` を開くとUIが表示されます。フロントエンドからPDFをアップロードすると、バックエンドの `/convert` APIを通じてOCR変換が行われ、結果PDFのプレビューとダウンロードが可能です。
-
-### 環境変数
-
-バックエンドのURLを変更する場合は、`frontend/.env` に以下のように設定できます。`.env` を直接編集せず、まずは同ディレクトリに用意した `.env.example` をコピーしてください。
-
-```
-cp frontend/.env.example frontend/.env
-```
-
-`frontend/.env` 内の `VITE_API_URL` を、デプロイ先のバックエンドURLに合わせて編集します。
-
-```
-VITE_API_URL=http://localhost:8000/convert
-```
-
-> **補足**: Vercel でホスティングする場合、フロントエンドから参照できる公開URLを `VITE_API_URL` に設定する必要があります。Vercel のプロジェクト設定で環境変数を追加すると、ビルド時に反映されます。
-
-## Vercel へのデプロイ
-
-Vercel ではフロントエンド（`frontend` ディレクトリ配下）を静的サイトとしてホスティングできます。リポジトリルートには `vercel.json` を配置しており、以下の設定で Vite ビルド成果物を公開します。
-
-- ビルドコマンド: `npm install && npm run build`
-- 出力ディレクトリ: `frontend/dist`
-- SPA 用のルーティング: すべてのリクエストを `index.html` へフォールバック
-
-> **重要**: 本プロジェクトのバックエンド（FastAPI + Tesseract OCR）は Vercel 上ではそのまま動作しません。Tesseract や Poppler などのネイティブ依存関係を含むため、Vercel とは別の環境（例: Cloud Run、Render、VPS など）にデプロイし、`VITE_API_URL` をそのバックエンドの公開URLに向けてください。
-
-### 手順サマリー
-
-1. バックエンドを任意のサーバーにデプロイし、HTTPS で公開する。
-2. Vercel のダッシュボードで新規プロジェクトを作成し、本リポジトリを接続する。
-3. 「Environment Variables」に `VITE_API_URL` を追加し、手順1で公開したバックエンドの `/convert` エンドポイントを指定する。
-4. ルートディレクトリの確認: `vercel.json` により自動的に `frontend` がビルド対象となるため、追加設定は不要。
-5. デプロイ後、フロントエンドが公開され、OCR 変換リクエストは外部バックエンドへ転送される。
-
-## CLIスクリプトとしての利用
-
-GUIではなくコマンドラインで変換したい場合は、従来通り `convert_to_searchable_pdf.py` を使用できます。
+### 検索可能PDFの作成
 
 ```bash
 python convert_to_searchable_pdf.py --input_path "入力PDFのパス" --output_path "出力PDFのパス"
 ```
 
-## 開発用スクリプト
+### テキストの抽出
 
-- バックエンドAPIの起動: `uvicorn app.main:app --reload`
-- フロントエンドのビルド: `npm run build`
-- フロントエンドのLint: `npm run lint`
+```bash
+python extract_text_from_pdf.py --pdf_path "入力PDFのパス" --output_path "保存するテキストファイルのパス"
+```
 
 ## ライセンス
 

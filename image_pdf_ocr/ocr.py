@@ -35,7 +35,9 @@ def find_and_set_tesseract_path() -> bool:
     return True
 
 
-def create_searchable_pdf(input_path: Union[str, os.PathLike], output_path: Union[str, os.PathLike]) -> None:
+def create_searchable_pdf(
+    input_path: Union[str, os.PathLike], output_path: Union[str, os.PathLike]
+) -> None:
     """画像PDFをOCRして検索可能なPDFを生成する。"""
     if not find_and_set_tesseract_path():
         raise OCRConversionError("Tesseract-OCRが見つかりません。インストールとPATH設定を確認してください。")
@@ -56,9 +58,10 @@ def create_searchable_pdf(input_path: Union[str, os.PathLike], output_path: Unio
     try:
         for page in input_doc:
             pix = page.get_pixmap(dpi=300)
-            img = Image.open(io.BytesIO(pix.tobytes()))
-
-            ocr_data = pytesseract.image_to_data(img, lang="jpn", output_type=pytesseract.Output.DATAFRAME)
+            with Image.open(io.BytesIO(pix.tobytes("png"))) as img:
+                ocr_data = pytesseract.image_to_data(
+                    img, lang="jpn", output_type=pytesseract.Output.DATAFRAME
+                )
             ocr_data = ocr_data[ocr_data.conf > 50]
 
             new_page = output_doc.new_page(width=page.rect.width, height=page.rect.height)
@@ -87,3 +90,45 @@ def create_searchable_pdf(input_path: Union[str, os.PathLike], output_path: Unio
         raise OCRConversionError(f"PDFを保存できませんでした: {exc}") from exc
     finally:
         output_doc.close()
+
+
+def extract_text_from_image_pdf(input_path: Union[str, os.PathLike]) -> str:
+    """画像ベースのPDFからOCRでテキストを抽出して返す。"""
+
+    if not find_and_set_tesseract_path():
+        raise OCRConversionError(
+            "Tesseract-OCRが見つかりません。インストールとPATH設定を確認してください。"
+        )
+
+    input_path = Path(input_path)
+    if not input_path.exists():
+        raise FileNotFoundError(f"入力ファイルが見つかりません: {input_path}")
+
+    try:
+        document = fitz.open(input_path)  # type: ignore[arg-type]
+    except Exception as exc:  # pragma: no cover - PyMuPDF例外
+        raise OCRConversionError(f"PDFファイルを開けませんでした: {exc}") from exc
+
+    texts: list[str] = []
+    try:
+        for index, page in enumerate(document, start=1):
+            pix = page.get_pixmap(dpi=300)
+            with Image.open(io.BytesIO(pix.tobytes("png"))) as image:
+                page_text = pytesseract.image_to_string(image, lang="jpn")
+            texts.append(f"--- ページ {index} ---\n{page_text.strip()}\n")
+    except Exception as exc:
+        raise OCRConversionError(f"テキスト抽出中に問題が発生しました: {exc}") from exc
+    finally:
+        document.close()
+
+    return "\n".join(texts).strip() + "\n"
+
+
+def extract_text_to_file(
+    input_path: Union[str, os.PathLike], output_path: Union[str, os.PathLike]
+) -> None:
+    """画像PDFから抽出したテキストをファイルに保存する。"""
+
+    text = extract_text_from_image_pdf(input_path)
+    output_path = Path(output_path)
+    output_path.write_text(text, encoding="utf-8")
