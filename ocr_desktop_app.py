@@ -34,13 +34,22 @@ class ProcessingWorkspace:
         self.output_text_path = tk.StringVar()
         self.status_var = tk.StringVar(value="準備完了")
 
-        self.convert_btn: tk.Button | None = None
-        self.extract_btn: tk.Button | None = None
+        self.mode_var = tk.StringVar(value="searchable_pdf")
+        self.mode_hint_var = tk.StringVar(value="")
+        self.mode_buttons: list[ttk.Radiobutton] = []
+        self.mode_hint_label: tk.Label | None = None
+        self.start_btn: tk.Button | None = None
         self.cancel_btn: tk.Button | None = None
         self.clear_btn: tk.Button | None = None
         self.clear_log_btn: tk.Button | None = None
         self.log_widget: ScrolledText | None = None
         self.progress: ttk.Progressbar | None = None
+        self.output_pdf_entry: tk.Entry | None = None
+        self.output_text_entry: tk.Entry | None = None
+        self.browse_output_pdf_btn: tk.Button | None = None
+        self.browse_output_text_btn: tk.Button | None = None
+        self.output_pdf_frame: tk.LabelFrame | None = None
+        self.output_text_frame: tk.LabelFrame | None = None
 
         self._worker: threading.Thread | None = None
         self._cancel_event: threading.Event | None = None
@@ -95,56 +104,101 @@ class ProcessingWorkspace:
         )
         browse_input_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
 
-        output_pdf_frame = tk.LabelFrame(left_frame, text="検索可能PDFの保存先")
-        output_pdf_frame.pack(fill=tk.X, pady=(0, 8))
+        self.output_pdf_frame = tk.LabelFrame(left_frame, text="検索可能PDFの保存先")
+        self.output_pdf_frame.pack(fill=tk.X, pady=(0, 8))
 
-        output_pdf_entry = tk.Entry(output_pdf_frame, textvariable=self.output_pdf_path)
-        output_pdf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
+        self.output_pdf_entry = tk.Entry(
+            self.output_pdf_frame, textvariable=self.output_pdf_path
+        )
+        self.output_pdf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
 
-        browse_output_pdf_btn = tk.Button(
-            output_pdf_frame,
+        self.browse_output_pdf_btn = tk.Button(
+            self.output_pdf_frame,
             text="保存先",
             width=10,
             command=self._select_output_pdf,
         )
-        browse_output_pdf_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
+        self.browse_output_pdf_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
 
-        output_text_frame = tk.LabelFrame(left_frame, text="抽出テキストの保存先")
-        output_text_frame.pack(fill=tk.X, pady=(0, 8))
+        self.output_text_frame = tk.LabelFrame(left_frame, text="抽出テキストの保存先")
+        self.output_text_frame.pack(fill=tk.X, pady=(0, 8))
 
-        output_text_entry = tk.Entry(output_text_frame, textvariable=self.output_text_path)
-        output_text_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
+        self.output_text_entry = tk.Entry(
+            self.output_text_frame, textvariable=self.output_text_path
+        )
+        self.output_text_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
 
-        browse_output_text_btn = tk.Button(
-            output_text_frame,
+        self.browse_output_text_btn = tk.Button(
+            self.output_text_frame,
             text="保存先",
             width=10,
             command=self._select_output_text,
         )
-        browse_output_text_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
+        self.browse_output_text_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
+
+        mode_frame = tk.LabelFrame(left_frame, text="処理内容")
+        mode_frame.pack(fill=tk.X, pady=(0, 8))
+
+        pdf_radio = ttk.Radiobutton(
+            mode_frame,
+            text="検索可能PDFを作成",
+            value="searchable_pdf",
+            variable=self.mode_var,
+            command=self._on_mode_changed,
+        )
+        pdf_radio.pack(anchor=tk.W, padx=12, pady=(8, 2))
+        self.mode_buttons.append(pdf_radio)
+
+        text_radio = ttk.Radiobutton(
+            mode_frame,
+            text="テキストを抽出",
+            value="extract_text",
+            variable=self.mode_var,
+            command=self._on_mode_changed,
+        )
+        text_radio.pack(anchor=tk.W, padx=12, pady=(0, 8))
+        self.mode_buttons.append(text_radio)
+
+        self.mode_hint_var.set(
+            "検索可能なPDFを作成します。保存先を確認してから実行してください。"
+        )
+        self.mode_hint_label = tk.Label(
+            left_frame,
+            textvariable=self.mode_hint_var,
+            anchor=tk.W,
+            justify=tk.LEFT,
+            wraplength=320,
+            fg="#555555",
+        )
+        self.mode_hint_label.pack(fill=tk.X, padx=4, pady=(0, 8))
 
         button_frame = tk.Frame(left_frame)
         button_frame.pack(fill=tk.X, pady=(0, 8))
 
-        self.convert_btn = tk.Button(
-            button_frame, text="検索可能PDFを作成", command=self._start_conversion
+        self.start_btn = tk.Button(
+            button_frame,
+            text="処理を開始",
+            command=self._start_processing,
         )
-        self.convert_btn.pack(side=tk.LEFT, padx=(0, 6))
-
-        self.extract_btn = tk.Button(
-            button_frame, text="テキストを抽出", command=self._start_extraction
-        )
-        self.extract_btn.pack(side=tk.LEFT, padx=6)
+        self.start_btn.pack(side=tk.LEFT, padx=(0, 6), ipadx=6, ipady=2)
 
         self.cancel_btn = tk.Button(
-            button_frame, text="キャンセル", state=tk.DISABLED, command=self._cancel_running_task
+            button_frame,
+            text="キャンセル",
+            state=tk.DISABLED,
+            command=self._cancel_running_task,
         )
         self.cancel_btn.pack(side=tk.LEFT, padx=6)
 
         self.clear_btn = tk.Button(
-            button_frame, text="画面をクリア", command=self._clear_workspace
+            button_frame,
+            text="リセット",
+            command=self._clear_workspace,
+            relief=tk.FLAT,
+            cursor="hand2",
+            fg="#444444",
         )
-        self.clear_btn.pack(side=tk.LEFT, padx=6)
+        self.clear_btn.pack(side=tk.RIGHT)
 
         status_frame = tk.LabelFrame(left_frame, text="進行状況")
         status_frame.pack(fill=tk.X)
@@ -167,6 +221,8 @@ class ProcessingWorkspace:
 
         self.log_widget = ScrolledText(log_frame, height=18, state=tk.DISABLED)
         self.log_widget.pack(fill=tk.BOTH, expand=True, padx=12, pady=(8, 12))
+
+        self._update_mode_dependent_widgets()
 
     # --- ファイルダイアログ ---------------------------------------------
     def _select_input_file(self) -> None:
@@ -237,9 +293,13 @@ class ProcessingWorkspace:
     def _set_busy(self, busy: bool) -> None:
         state = tk.DISABLED if busy else tk.NORMAL
 
-        if self.convert_btn and self.extract_btn:
-            self.convert_btn.configure(state=state)
-            self.extract_btn.configure(state=state)
+        if self.start_btn:
+            if busy:
+                self.start_btn.configure(state=tk.DISABLED, text="処理中…")
+            else:
+                self.start_btn.configure(state=tk.NORMAL)
+        for radio in self.mode_buttons:
+            radio.configure(state=state)
         if self.cancel_btn:
             self.cancel_btn.configure(state=tk.NORMAL if busy else tk.DISABLED)
         if self.clear_btn:
@@ -261,11 +321,25 @@ class ProcessingWorkspace:
             else:
                 self.progress.stop()
 
+        if not busy:
+            self._update_mode_dependent_widgets()
+
     def _cancel_running_task(self) -> None:
         if self._cancel_event and not self._cancel_event.is_set():
             self._cancel_event.set()
             self._log("キャンセル要求を送信しました。")
             self._notify(lambda: self._update_status("キャンセルしています…"))
+
+    def _on_mode_changed(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        self._update_mode_dependent_widgets()
+
+    def _start_processing(self) -> None:
+        if self.mode_var.get() == "extract_text":
+            self._start_extraction()
+        else:
+            self._start_conversion()
 
     # --- ボタン操作 -----------------------------------------------------
     def _start_conversion(self) -> None:
@@ -407,6 +481,46 @@ class ProcessingWorkspace:
                 lambda: self._update_status("テキスト抽出が完了しました。")
             )
 
+    # --- UI補助 ---------------------------------------------------------
+    def _update_mode_dependent_widgets(self) -> None:
+        mode = self.mode_var.get()
+        is_pdf_mode = mode != "extract_text"
+        pdf_label = "検索可能PDFの保存先"
+        text_label = "抽出テキストの保存先"
+
+        if is_pdf_mode:
+            hint = (
+                "検索可能なPDFを作成します。"
+                "保存先を確認して「検索可能PDFを作成」をクリックしてください。"
+            )
+        else:
+            hint = (
+                "PDFからテキストを抽出します。"
+                "テキストの保存先を確認して「テキストを抽出」をクリックしてください。"
+            )
+        self.mode_hint_var.set(hint)
+
+        if self.output_pdf_frame:
+            suffix = "（必須）" if is_pdf_mode else "（不要）"
+            self.output_pdf_frame.configure(text=f"{pdf_label}{suffix}")
+        if self.output_text_frame:
+            suffix = "（必須）" if not is_pdf_mode else "（不要）"
+            self.output_text_frame.configure(text=f"{text_label}{suffix}")
+
+        if self.output_pdf_entry and self.browse_output_pdf_btn:
+            pdf_state = tk.NORMAL if is_pdf_mode else tk.DISABLED
+            self.output_pdf_entry.configure(state=pdf_state)
+            self.browse_output_pdf_btn.configure(state=pdf_state)
+
+        if self.output_text_entry and self.browse_output_text_btn:
+            text_state = tk.NORMAL if not is_pdf_mode else tk.DISABLED
+            self.output_text_entry.configure(state=text_state)
+            self.browse_output_text_btn.configure(state=text_state)
+
+        if self.start_btn and (not self._worker or not self._worker.is_alive()):
+            button_text = "検索可能PDFを作成" if is_pdf_mode else "テキストを抽出"
+            self.start_btn.configure(text=button_text)
+
     # --- ユーティリティ -------------------------------------------------
     def _suggest_output_paths(self, input_path: Path) -> None:
         stem = input_path.stem
@@ -479,6 +593,7 @@ class ProcessingWorkspace:
         self._last_auto_pdf_path = None
         self._last_auto_text_path = None
         self._clear_log()
+        self._update_mode_dependent_widgets()
 
 
 class PDFPasswordRemovalWorkspace:
