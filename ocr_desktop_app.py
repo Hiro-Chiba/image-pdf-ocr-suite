@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from image_pdf_ocr import (
@@ -28,7 +28,9 @@ class OCRDesktopApp:
         self.input_path = tk.StringVar()
         self.output_pdf_path = tk.StringVar()
         self.output_text_path = tk.StringVar()
+        self.status_var = tk.StringVar(value="準備完了")
 
+        self.master.report_callback_exception = self._handle_ui_exception
         self._create_widgets()
 
     # UI構築
@@ -93,7 +95,16 @@ class OCRDesktopApp:
         clear_btn.pack(side=tk.LEFT, padx=6)
 
         self.log_widget = ScrolledText(self.master, height=16, state=tk.DISABLED)
-        self.log_widget.pack(fill=tk.BOTH, expand=True, padx=12, pady=(12, 12))
+        self.log_widget.pack(fill=tk.BOTH, expand=True, padx=12, pady=(12, 6))
+
+        status_frame = tk.Frame(self.master)
+        status_frame.pack(fill=tk.X, padx=12, pady=(0, 12))
+
+        self.progress = ttk.Progressbar(status_frame, mode="indeterminate")
+        self.progress.pack(side=tk.LEFT, padx=(0, 12), pady=4)
+
+        status_label = tk.Label(status_frame, textvariable=self.status_var, anchor=tk.W)
+        status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     # ファイルダイアログ
     def _select_input_file(self) -> None:
@@ -155,6 +166,10 @@ class OCRDesktopApp:
         state = tk.DISABLED if busy else tk.NORMAL
         self.convert_btn.configure(state=state)
         self.extract_btn.configure(state=state)
+        if busy:
+            self.progress.start(10)
+        else:
+            self.progress.stop()
 
     def _start_conversion(self) -> None:
         input_path = self._validate_input()
@@ -167,7 +182,16 @@ class OCRDesktopApp:
             return
         output_path = Path(output_path_str)
 
+        if output_path.suffix.lower() != ".pdf":
+            self._show_error("保存先には.pdf拡張子を指定してください。")
+            return
+
+        if input_path.resolve() == output_path.resolve():
+            self._show_error("入力ファイルと同じパスには保存できません。保存先を変更してください。")
+            return
+
         self._set_busy(True)
+        self._update_status("検索可能PDFを生成しています…")
         self._run_in_thread(
             lambda: self._convert_task(input_path=input_path, output_path=output_path)
         )
@@ -183,7 +207,16 @@ class OCRDesktopApp:
             return
         output_path = Path(output_path_str)
 
+        if output_path.suffix.lower() not in (".txt", ".md"):
+            self._show_error("テキストファイルの保存先には.txtまたは.mdを指定してください。")
+            return
+
+        if input_path.resolve() == output_path.resolve():
+            self._show_error("入力PDFと同じファイル名には保存できません。")
+            return
+
         self._set_busy(True)
+        self._update_status("テキストを抽出しています…")
         self._run_in_thread(
             lambda: self._extract_task(input_path=input_path, output_path=output_path)
         )
@@ -195,15 +228,25 @@ class OCRDesktopApp:
             create_searchable_pdf(
                 input_path,
                 output_path,
-                progress_callback=self._log,
+                progress_callback=self._make_progress_callback(),
             )
         except (FileNotFoundError, OCRConversionError) as exc:
             message = str(exc)
             self._log(f"エラー: {message}")
-            self._notify(lambda msg=message: self._show_error(msg))
+            self._notify(
+                lambda msg=message: (
+                    self._show_error(msg),
+                    self._update_status("エラーが発生しました。ログをご確認ください。"),
+                )
+            )
         except Exception as exc:  # 予期しない例外
             self._log(f"予期しないエラー: {exc}")
-            self._notify(lambda: self._show_error("変換に失敗しました。詳細はログを参照してください。"))
+            self._notify(
+                lambda: (
+                    self._show_error("変換に失敗しました。詳細はログを参照してください。"),
+                    self._update_status("予期しないエラーが発生しました。"),
+                )
+            )
         else:
             self._log("検索可能PDFの作成が完了しました。")
             self._notify(
@@ -211,6 +254,7 @@ class OCRDesktopApp:
                     "完了", f"検索可能なPDFを保存しました:\n{output_path}"
                 )
             )
+            self._notify(lambda: self._update_status("検索可能PDFの作成が完了しました。"))
         finally:
             self._notify(lambda: self._set_busy(False))
 
@@ -220,15 +264,25 @@ class OCRDesktopApp:
             extract_text_to_file(
                 input_path,
                 output_path,
-                progress_callback=self._log,
+                progress_callback=self._make_progress_callback(),
             )
         except (FileNotFoundError, OCRConversionError) as exc:
             message = str(exc)
             self._log(f"エラー: {message}")
-            self._notify(lambda msg=message: self._show_error(msg))
+            self._notify(
+                lambda msg=message: (
+                    self._show_error(msg),
+                    self._update_status("エラーが発生しました。ログをご確認ください。"),
+                )
+            )
         except Exception as exc:
             self._log(f"予期しないエラー: {exc}")
-            self._notify(lambda: self._show_error("テキスト抽出に失敗しました。詳細はログを参照してください。"))
+            self._notify(
+                lambda: (
+                    self._show_error("テキスト抽出に失敗しました。詳細はログを参照してください。"),
+                    self._update_status("予期しないエラーが発生しました。"),
+                )
+            )
         else:
             self._log("テキスト抽出が完了しました。")
             self._notify(
@@ -236,6 +290,7 @@ class OCRDesktopApp:
                     "完了", f"テキストを保存しました:\n{output_path}"
                 )
             )
+            self._notify(lambda: self._update_status("テキスト抽出が完了しました。"))
         finally:
             self._notify(lambda: self._set_busy(False))
 
@@ -250,6 +305,16 @@ class OCRDesktopApp:
 
     def _notify(self, callback: Callable[[], None]) -> None:
         self.master.after(0, callback)
+
+    def _make_progress_callback(self) -> Callable[[str], None]:
+        def _callback(message: str) -> None:
+            self._log(message)
+            self._notify(lambda: self._update_status(message))
+
+        return _callback
+
+    def _update_status(self, message: str) -> None:
+        self.status_var.set(message)
 
     def _log(self, message: str) -> None:
         def append() -> None:
@@ -267,6 +332,11 @@ class OCRDesktopApp:
         self.log_widget.configure(state=tk.NORMAL)
         self.log_widget.delete("1.0", tk.END)
         self.log_widget.configure(state=tk.DISABLED)
+
+    def _handle_ui_exception(self, exc_type, exc_value, exc_traceback) -> None:  # type: ignore[override]
+        self._log(f"UIエラー: {exc_value}")
+        self._update_status("UIで予期しないエラーが発生しました。ログをご確認ください。")
+        messagebox.showerror("UIエラー", "予期しないUIエラーが発生しました。ログを確認してください。")
 
 
 def main() -> None:
