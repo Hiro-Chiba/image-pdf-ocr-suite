@@ -9,7 +9,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Tuple, Union
+from typing import Callable, Iterable, Tuple, Union
 
 import fitz  # type: ignore
 import pytesseract
@@ -171,24 +171,29 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes:02d}:{sec:02d}"
 
 
-def _print_progress(current: int, total: int, start_time: float) -> None:
-    """進捗と推定残り時間を表示する。"""
+def _build_progress_message(current: int, total: int, start_time: float) -> str:
+    """進捗状況と推定残り時間のメッセージを生成する。"""
 
     if total <= 0:
-        print("=== 進捗: ページ数が不明です", flush=True)
-        return
+        return "進捗: ページ数が不明です"
 
     elapsed = time.perf_counter() - start_time
     average_per_page = elapsed / current if current else float("inf")
     remaining_pages = max(total - current, 0)
     remaining_estimate = average_per_page * remaining_pages
-    percent = (current / total) * 100
     remaining_text = _format_duration(remaining_estimate)
 
-    print(
-        f"=== {current}/{total} ページ完了 ({percent:5.1f}%) 残り推定時間: {remaining_text}",
-        flush=True,
-    )
+    bar_length = 20
+    progress_ratio = current / total if total else 0.0
+    filled = int(progress_ratio * bar_length)
+    if current >= total:
+        filled = bar_length
+    elif current > 0 and filled == 0:
+        filled = 1
+    filled = min(filled, bar_length)
+    bar = "=" * filled + "." * (bar_length - filled)
+
+    return f"{current}/{total}ページ完了　残り推定時間: {remaining_text}\n[{bar}]"
 
 
 def _find_japanese_font_path() -> Path:
@@ -384,7 +389,9 @@ def find_and_set_tesseract_path() -> bool:
 
 
 def create_searchable_pdf(
-    input_path: Union[str, os.PathLike], output_path: Union[str, os.PathLike]
+    input_path: Union[str, os.PathLike],
+    output_path: Union[str, os.PathLike],
+    progress_callback: Callable[[str], None] | None = None,
 ) -> None:
     """画像PDFをOCRして検索可能なPDFを生成する。"""
     if not find_and_set_tesseract_path():
@@ -408,8 +415,14 @@ def create_searchable_pdf(
     total_pages = input_doc.page_count
     start_time = time.perf_counter()
 
+    def _dispatch_progress(message: str) -> None:
+        if progress_callback:
+            progress_callback(message)
+        else:
+            print(message, flush=True)
+
     if total_pages == 0:
-        print("=== ページが存在しないPDFです。処理を終了します。", flush=True)
+        _dispatch_progress("ページが存在しないPDFです。処理を終了します。")
 
     try:
         for index, page in enumerate(input_doc, start=1):
@@ -444,7 +457,8 @@ def create_searchable_pdf(
                     # PyMuPDFのフォント描画で稀に失敗するケースがあるため無視
                     continue
 
-            _print_progress(index, total_pages, start_time)
+            message = _build_progress_message(index, total_pages, start_time)
+            _dispatch_progress(message)
     except Exception as exc:
         raise OCRConversionError(f"ページ処理中に問題が発生しました: {exc}") from exc
     finally:
