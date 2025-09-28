@@ -10,6 +10,7 @@ from typing import Union
 import fitz  # type: ignore
 import pytesseract
 from PIL import Image
+from shutil import which
 
 
 class OCRConversionError(RuntimeError):
@@ -17,16 +18,46 @@ class OCRConversionError(RuntimeError):
 
 
 def find_and_set_tesseract_path() -> bool:
-    """Windows環境でTesseractのパスを推測して設定する。"""
+    """環境に応じてTesseractの実行ファイルを検出して設定する。"""
+
+    def _set_cmd_if_exists(path: Path) -> bool:
+        if path.exists():
+            pytesseract.pytesseract.tesseract_cmd = str(path)
+            return True
+        return False
+
+    # 環境変数で明示的に指定されている場合を優先する
+    for env_name in ("TESSERACT_CMD", "TESSERACT_PATH", "PIL_TESSERACT_CMD"):
+        env_value = os.environ.get(env_name)
+        if env_value and _set_cmd_if_exists(Path(env_value)):
+            break
+
+    # すでに設定済みの場合やPATHで検出できた場合はそのまま利用する
+    if pytesseract.pytesseract.tesseract_cmd:
+        try:
+            pytesseract.get_tesseract_version()
+            return True
+        except pytesseract.TesseractNotFoundError:
+            pass
+
+    cmd_from_path = which("tesseract")
+    if cmd_from_path and _set_cmd_if_exists(Path(cmd_from_path)):
+        try:
+            pytesseract.get_tesseract_version()
+            return True
+        except pytesseract.TesseractNotFoundError:
+            pass
+
+    # Windows向けの既定インストールパスをチェック
     path_64 = Path(r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe")
     path_32 = Path(r"C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe")
 
-    if path_64.exists():
-        pytesseract.pytesseract.tesseract_cmd = str(path_64)
-        return True
-    if path_32.exists():
-        pytesseract.pytesseract.tesseract_cmd = str(path_32)
-        return True
+    if _set_cmd_if_exists(path_64) or _set_cmd_if_exists(path_32):
+        try:
+            pytesseract.get_tesseract_version()
+            return True
+        except pytesseract.TesseractNotFoundError:
+            pass
 
     try:
         pytesseract.get_tesseract_version()
