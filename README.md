@@ -25,6 +25,7 @@ image-pdf-ocr-suite/
 - Tesseract-OCR（日本語データを含む）
   - [UB Mannheim版インストーラー](https://github.com/UB-Mannheim/tesseract/wiki)が便利です。
   - インストール時に `Additional language data` → `Japanese` を選択し、可能であればシステムPATHへ追加してください。
+  - もしコマンドラインから `tesseract -v` が実行できない場合は、環境変数 `TESSERACT_CMD` または `TESSERACT_PATH` に `tesseract.exe`（Windows）や `tesseract` バイナリ（macOS/Linux）のパスを設定してください。
 
 ## セットアップ
 
@@ -55,6 +56,13 @@ python convert_to_searchable_pdf.py --input_path "入力PDFのパス" --output_p
 ```bash
 python extract_text_from_pdf.py --pdf_path "入力PDFのパス" --output_path "保存するテキストファイルのパス"
 ```
+
+## トラブルシューティング
+
+- `Tesseract-OCRが見つかりません。インストールとPATH設定を確認してください。`
+  - Tesseract本体が未インストール、またはインストール済みでもPATHに登録されていない場合に発生します。
+  - コマンドラインから `tesseract -v` が正常に実行できるか確認してください。
+  - インストール先が標準パス以外の場合は、環境変数 `TESSERACT_CMD`（または `TESSERACT_PATH`）に実行ファイルのパスを設定してください。GUI/CLIいずれの処理でもこの設定が利用されます。
 
 ## ライセンス
 
