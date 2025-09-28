@@ -5,6 +5,7 @@ from .ocr import (
     extract_text_from_image_pdf,
     extract_text_to_file,
     find_and_set_tesseract_path,
+    OCRCancelledError,
     OCRConversionError,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "extract_text_from_image_pdf",
     "extract_text_to_file",
     "find_and_set_tesseract_path",
+    "OCRCancelledError",
     "OCRConversionError",
 ]
