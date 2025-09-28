@@ -393,6 +393,8 @@ def create_searchable_pdf(
     if not input_path.exists():
         raise FileNotFoundError(f"入力ファイルが見つかりません: {input_path}")
 
+    _prepare_output_path(output_path)
+
     font_path = _find_japanese_font_path()
 
     try:
@@ -456,6 +458,10 @@ def create_searchable_pdf(
 
     try:
         output_doc.save(output_path, garbage=4, deflate=True, clean=True)
+    except PermissionError as exc:
+        raise OCRConversionError(
+            f"PDFを書き込めませんでした。権限を確認してください: {exc}"
+        ) from exc
     except Exception as exc:  # pragma: no cover - save時のPyMuPDF例外
         raise OCRConversionError(f"PDFを保存できませんでした: {exc}") from exc
     finally:
@@ -526,4 +532,30 @@ def extract_text_to_file(
         input_path, progress_callback=progress_callback
     )
     output_path = Path(output_path)
-    output_path.write_text(text, encoding="utf-8")
+    _prepare_output_path(output_path)
+
+    try:
+        output_path.write_text(text, encoding="utf-8")
+    except PermissionError as exc:
+        raise OCRConversionError(
+            f"テキストを書き込めませんでした。権限を確認してください: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise OCRConversionError(f"テキストファイルを保存できませんでした: {exc}") from exc
+
+
+def _prepare_output_path(path: Path) -> None:
+    """出力パスの親ディレクトリを作成し、書き込み可能か確認する。"""
+
+    try:
+        parent = path.parent
+        if parent and not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:  # pragma: no cover - filesystem permissions vary
+        raise OCRConversionError(
+            f"出力先ディレクトリを作成できませんでした: {exc}"
+        ) from exc
+
+    if path.exists() and path.is_dir():
+        raise OCRConversionError(f"出力パスがディレクトリを指しています: {path}")
+
