@@ -15,9 +15,11 @@ from image_pdf_ocr import (
     OCRConversionError,
     PDFPasswordRemovalError,
     create_searchable_pdf,
+    create_searchable_pdf_from_images,
     extract_text_to_file,
     remove_pdf_password,
 )
+from PIL import Image, ImageTk
 
 
 class ProcessingWorkspace:
@@ -655,6 +657,492 @@ class PDFPasswordRemovalWorkspace:
         self.status_var.set("準備完了")
 
 
+
+class ImagesToPDFWorkspace:
+    """画像から検索可能PDFを生成するための作業画面。"""
+
+    _preview_max_size = (480, 640)
+
+    def __init__(self, app: "OCRDesktopApp", parent: tk.Widget) -> None:
+        self.root = app.master
+        self.frame = tk.Frame(parent)
+
+        self.image_paths: list[Path] = []
+        self.output_path = tk.StringVar()
+        self.status_var = tk.StringVar(value="準備完了")
+        self.progress_label_var = tk.StringVar(value="進捗: 0/0ページ")
+        self.preview_info_var = tk.StringVar(value="プレビューはまだありません")
+
+        self.step_vars: dict[str, tk.BooleanVar] = {
+            "select": tk.BooleanVar(value=False),
+            "layout": tk.BooleanVar(value=False),
+            "ocr": tk.BooleanVar(value=False),
+            "save": tk.BooleanVar(value=False),
+        }
+
+        self.image_listbox: tk.Listbox | None = None
+        self.log_widget: ScrolledText | None = None
+        self.progress_bar: ttk.Progressbar | None = None
+        self.preview_label: tk.Label | None = None
+
+        self.add_btn: tk.Button | None = None
+        self.remove_btn: tk.Button | None = None
+        self.up_btn: tk.Button | None = None
+        self.down_btn: tk.Button | None = None
+        self.clear_list_btn: tk.Button | None = None
+        self.convert_btn: tk.Button | None = None
+        self.cancel_btn: tk.Button | None = None
+        self.clear_btn: tk.Button | None = None
+        self.browse_btn: tk.Button | None = None
+
+        self._worker: threading.Thread | None = None
+        self._cancel_event: threading.Event | None = None
+        self._last_auto_output: Path | None = None
+        self._preview_photo: ImageTk.PhotoImage | None = None
+        self._preview_started = False
+        self._ocr_started = False
+        self._suspend_output_trace = False
+
+        self.output_path.trace_add('write', lambda *_args: self._on_output_path_changed())
+
+        self._create_widgets()
+
+    # --- ライフサイクル -------------------------------------------------
+    def pack(self, *, fill: str, expand: bool, padx: tuple[int, int], pady: tuple[int, int]) -> None:
+        self.frame.pack(fill=fill, expand=expand, padx=padx, pady=pady)
+
+    def prepare_for_destroy(self) -> None:
+        self._cancel_running_task()
+        worker = self._worker
+        if worker and worker.is_alive():
+            worker.join(timeout=0.1)
+
+    def destroy(self) -> None:
+        self.frame.destroy()
+
+    # --- UI構築 ---------------------------------------------------------
+    def _create_widgets(self) -> None:
+        container = tk.Frame(self.frame)
+        container.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+
+        left_frame = tk.Frame(container)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        preview_frame = tk.LabelFrame(container, text="プレビュー")
+        preview_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0))
+
+        image_frame = tk.LabelFrame(left_frame, text="入力画像")
+        image_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        self.image_listbox = tk.Listbox(image_frame, selectmode=tk.EXTENDED, height=12)
+        self.image_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0), pady=8)
+        scrollbar = tk.Scrollbar(image_frame, orient=tk.VERTICAL, command=self.image_listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 12), pady=8)
+        self.image_listbox.configure(yscrollcommand=scrollbar.set)
+
+        list_btn_frame = tk.Frame(image_frame)
+        list_btn_frame.pack(fill=tk.X, padx=12, pady=(0, 8))
+
+        self.add_btn = tk.Button(list_btn_frame, text="画像を追加", command=self._add_images)
+        self.add_btn.pack(side=tk.LEFT, padx=2)
+        self.remove_btn = tk.Button(list_btn_frame, text="選択を削除", command=self._remove_selected)
+        self.remove_btn.pack(side=tk.LEFT, padx=2)
+        self.up_btn = tk.Button(list_btn_frame, text="上へ", command=self._move_up)
+        self.up_btn.pack(side=tk.LEFT, padx=2)
+        self.down_btn = tk.Button(list_btn_frame, text="下へ", command=self._move_down)
+        self.down_btn.pack(side=tk.LEFT, padx=2)
+        self.clear_list_btn = tk.Button(list_btn_frame, text="一覧をクリア", command=self._clear_images)
+        self.clear_list_btn.pack(side=tk.LEFT, padx=2)
+
+        output_frame = tk.LabelFrame(left_frame, text="検索可能PDFの保存先")
+        output_frame.pack(fill=tk.X, pady=(0, 8))
+
+        output_entry = tk.Entry(output_frame, textvariable=self.output_path)
+        output_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
+
+        self.browse_btn = tk.Button(output_frame, text="保存先", width=10, command=self._select_output_path)
+        self.browse_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
+
+        steps_frame = tk.LabelFrame(left_frame, text="進行チェック")
+        steps_frame.pack(fill=tk.X, pady=(0, 8))
+
+        step_labels = (
+            ("画像の読み込み", self.step_vars["select"]),
+            ("ページ整形", self.step_vars["layout"]),
+            ("OCR処理", self.step_vars["ocr"]),
+            ("PDF保存", self.step_vars["save"]),
+        )
+        for index, (label, var) in enumerate(step_labels):
+            chk = tk.Checkbutton(steps_frame, text=label, variable=var, state=tk.DISABLED)
+            chk.grid(row=index // 2, column=index % 2, padx=12, pady=4, sticky='w')
+
+        button_frame = tk.Frame(left_frame)
+        button_frame.pack(fill=tk.X, pady=(0, 8))
+
+        self.convert_btn = tk.Button(button_frame, text="検索可能PDFを生成", command=self._start_conversion)
+        self.convert_btn.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.cancel_btn = tk.Button(button_frame, text="キャンセル", state=tk.DISABLED, command=self._cancel_running_task)
+        self.cancel_btn.pack(side=tk.LEFT, padx=6)
+
+        self.clear_btn = tk.Button(button_frame, text="画面をクリア", command=self._clear_workspace)
+        self.clear_btn.pack(side=tk.LEFT, padx=6)
+
+        progress_frame = tk.Frame(left_frame)
+        progress_frame.pack(fill=tk.X, pady=(0, 8))
+
+        self.progress_bar = ttk.Progressbar(progress_frame, mode="determinate")
+        self.progress_bar.pack(fill=tk.X, padx=12, pady=(4, 2))
+        self.progress_bar.configure(maximum=1, value=0)
+
+        status_label = tk.Label(progress_frame, textvariable=self.status_var, anchor=tk.W)
+        status_label.pack(fill=tk.X, padx=12, pady=(0, 2))
+
+        progress_label = tk.Label(progress_frame, textvariable=self.progress_label_var, anchor=tk.W)
+        progress_label.pack(fill=tk.X, padx=12, pady=(0, 4))
+
+        log_frame = tk.LabelFrame(left_frame, text="ログ")
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.log_widget = ScrolledText(log_frame, height=12, state=tk.DISABLED)
+        self.log_widget.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+
+        self.preview_label = tk.Label(
+            preview_frame,
+            text="プレビューはここに表示されます",
+            anchor=tk.CENTER,
+            justify=tk.CENTER,
+            relief=tk.SUNKEN,
+        )
+        self.preview_label.pack(fill=tk.BOTH, expand=True, padx=12, pady=(12, 6))
+
+        preview_info_label = tk.Label(preview_frame, textvariable=self.preview_info_var, anchor=tk.W)
+        preview_info_label.pack(fill=tk.X, padx=12, pady=(0, 12))
+
+    # --- ファイル操作 ---------------------------------------------------
+    def _add_images(self) -> None:
+        file_paths = filedialog.askopenfilenames(
+            title="画像ファイルを選択",
+            filetypes=(("画像ファイル", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp"), ("すべてのファイル", "*.*")),
+        )
+        if not file_paths:
+            return
+
+        for path_str in file_paths:
+            path = Path(path_str)
+            if path not in self.image_paths:
+                self.image_paths.append(path)
+
+        self._update_image_listbox()
+        self._suggest_output_path()
+        self._update_step_flags()
+
+    def _remove_selected(self) -> None:
+        if not self.image_listbox:
+            return
+        selection = list(self.image_listbox.curselection())
+        if not selection:
+            return
+        for index in sorted(selection, reverse=True):
+            if 0 <= index < len(self.image_paths):
+                del self.image_paths[index]
+        self._update_image_listbox()
+        self._update_step_flags()
+
+    def _move_up(self) -> None:
+        if not self.image_listbox:
+            return
+        selection = sorted(self.image_listbox.curselection())
+        if not selection:
+            return
+        for index in selection:
+            if index <= 0:
+                continue
+            self.image_paths[index - 1], self.image_paths[index] = (
+                self.image_paths[index],
+                self.image_paths[index - 1],
+            )
+        self._update_image_listbox()
+        self.image_listbox.selection_clear(0, tk.END)
+        for index in selection:
+            self.image_listbox.selection_set(max(index - 1, 0))
+
+    def _move_down(self) -> None:
+        if not self.image_listbox:
+            return
+        selection = sorted(self.image_listbox.curselection(), reverse=True)
+        if not selection:
+            return
+        for index in selection:
+            if index >= len(self.image_paths) - 1:
+                continue
+            self.image_paths[index + 1], self.image_paths[index] = (
+                self.image_paths[index],
+                self.image_paths[index + 1],
+            )
+        self._update_image_listbox()
+        self.image_listbox.selection_clear(0, tk.END)
+        for index in selection:
+            self.image_listbox.selection_set(min(index + 1, len(self.image_paths) - 1))
+
+    def _clear_images(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        self.image_paths.clear()
+        self._update_image_listbox()
+        self._update_step_flags()
+        self._reset_preview()
+
+    def _select_output_path(self) -> None:
+        current = self.output_path.get().strip()
+        default = Path(current) if current else None
+        initialdir = default.parent if default else None
+        initialfile = default.name if default else None
+        file_path = filedialog.asksaveasfilename(
+            title="検索可能PDFの保存先",
+            defaultextension=".pdf",
+            initialdir=initialdir,
+            initialfile=initialfile,
+            filetypes=(("PDF", "*.pdf"),),
+        )
+        if file_path:
+            self.output_path.set(file_path)
+            self._last_auto_output = None
+
+    # --- 進捗・プレビュー更新 -------------------------------------------
+    def _make_progress_callback(self) -> Callable[[int, int, str], None]:
+        def _callback(current: int, total: int, message: str) -> None:
+            self._notify(lambda: self._handle_progress(current, total, message))
+
+        return _callback
+
+    def _handle_progress(self, current: int, total: int, message: str) -> None:
+        if self.progress_bar:
+            self.progress_bar.configure(maximum=max(total, 1))
+            self.progress_bar.configure(value=min(current, total))
+        self.progress_label_var.set(message)
+        self.status_var.set(message)
+        if not self._ocr_started:
+            self.step_vars["ocr"].set(True)
+            self._ocr_started = True
+
+    def _make_preview_callback(self) -> Callable[[int, int, Image.Image], None]:
+        def _callback(current: int, total: int, image: Image.Image) -> None:
+            self._notify(lambda: self._handle_preview(current, total, image.copy()))
+
+        return _callback
+
+    def _handle_preview(self, current: int, total: int, image: Image.Image) -> None:
+        preview = image.copy()
+        preview.thumbnail(self._preview_max_size, Image.LANCZOS)
+        self._preview_photo = ImageTk.PhotoImage(preview)
+        if self.preview_label:
+            self.preview_label.configure(image=self._preview_photo, text="")
+        self.preview_info_var.set(f"プレビュー: {current}/{total}ページ")
+        if not self._preview_started:
+            self.step_vars["layout"].set(True)
+            self._preview_started = True
+
+    # --- スレッド制御 ---------------------------------------------------
+    def _run_in_thread(self, target: Callable[[], None]) -> None:
+        def wrapper() -> None:
+            try:
+                target()
+            finally:
+                self._worker = None
+                self._cancel_event = None
+                self._notify(lambda: self._set_busy(False))
+
+        self._worker = threading.Thread(target=wrapper, daemon=True)
+        self._worker.start()
+
+    def _set_busy(self, busy: bool) -> None:
+        state = tk.DISABLED if busy else tk.NORMAL
+        for widget in (
+            self.add_btn,
+            self.remove_btn,
+            self.up_btn,
+            self.down_btn,
+            self.clear_list_btn,
+            self.convert_btn,
+            self.clear_btn,
+            self.browse_btn,
+        ):
+            if widget:
+                widget.configure(state=state)
+        if self.image_listbox:
+            self.image_listbox.configure(state=state)
+        if self.cancel_btn:
+            self.cancel_btn.configure(state=tk.NORMAL if busy else tk.DISABLED)
+
+    def _cancel_running_task(self) -> None:
+        if self._cancel_event and not self._cancel_event.is_set():
+            self._cancel_event.set()
+            self._log("キャンセル要求を送信しました。")
+            self._notify(lambda: self._update_status("キャンセルしています…"))
+
+    # --- ボタン操作 -----------------------------------------------------
+    def _start_conversion(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        if not self.image_paths:
+            messagebox.showerror("エラー", "入力画像を追加してください。")
+            return
+
+        output_path_str = self.output_path.get().strip()
+        if not output_path_str:
+            messagebox.showerror("エラー", "出力先のPDFファイルを指定してください。")
+            return
+
+        output_path = Path(output_path_str)
+        if output_path.suffix.lower() != ".pdf":
+            messagebox.showerror("エラー", ".pdf拡張子のファイル名を指定してください。")
+            return
+
+        self._cancel_event = threading.Event()
+        self._reset_steps()
+        self._set_busy(True)
+        self._reset_progress(len(self.image_paths))
+        self._reset_preview()
+        self._update_status("画像から検索可能PDFを生成しています…")
+        self._log(f"生成を開始: {output_path}")
+
+        image_list = list(self.image_paths)
+        self._run_in_thread(
+            lambda: self._conversion_task(image_list=image_list, output_path=output_path)
+        )
+
+    def _conversion_task(self, image_list: list[Path], output_path: Path) -> None:
+        try:
+            create_searchable_pdf_from_images(
+                image_list,
+                output_path,
+                progress_callback=self._make_progress_callback(),
+                preview_callback=self._make_preview_callback(),
+                cancel_event=self._cancel_event,
+            )
+        except OCRCancelledError:
+            self._log("画像からPDFへの変換をキャンセルしました。")
+            self._notify(lambda: self._update_status("変換をキャンセルしました。"))
+        except (FileNotFoundError, OCRConversionError) as exc:
+            message = str(exc)
+            self._log(f"エラー: {message}")
+            self._handle_failure(message)
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"予期しないエラー: {exc}")
+            self._handle_failure("変換中に予期しないエラーが発生しました。ログを確認してください。")
+        else:
+            self._log("画像からPDFの変換が完了しました。")
+
+            def _on_success() -> None:
+                self.step_vars["save"].set(True)
+                self._update_status("変換が完了しました。")
+                messagebox.showinfo(
+                    "完了", f"検索可能なPDFを保存しました:\n{output_path}"
+                )
+
+            self._notify(_on_success)
+
+    # --- ユーティリティ -------------------------------------------------
+    def _update_image_listbox(self) -> None:
+        if not self.image_listbox:
+            return
+        self.image_listbox.delete(0, tk.END)
+        for index, path in enumerate(self.image_paths, start=1):
+            self.image_listbox.insert(tk.END, f"{index:02d}: {path.name}")
+
+    def _suggest_output_path(self) -> None:
+        if not self.image_paths:
+            return
+        first = self.image_paths[0]
+        suggested = first.with_name(f"{first.stem}_searchable.pdf")
+        current = self.output_path.get().strip()
+        if not current or current == str(self._last_auto_output):
+            self._suspend_output_trace = True
+            self.output_path.set(str(suggested))
+            self._suspend_output_trace = False
+            self._last_auto_output = suggested
+
+    def _reset_progress(self, total: int) -> None:
+        if self.progress_bar:
+            self.progress_bar.configure(maximum=max(total, 1), value=0)
+        self.progress_label_var.set(f"進捗: 0/{total}ページ")
+
+    def _reset_preview(self) -> None:
+        if self.preview_label:
+            self.preview_label.configure(image="", text="プレビューはここに表示されます")
+        self._preview_photo = None
+        self.preview_info_var.set("プレビューはまだありません")
+        self._preview_started = False
+
+    def _reset_steps(self) -> None:
+        for var in self.step_vars.values():
+            var.set(False)
+        self.step_vars["select"].set(bool(self.image_paths))
+        self._preview_started = False
+        self._ocr_started = False
+
+    def _update_step_flags(self) -> None:
+        self.step_vars["select"].set(bool(self.image_paths))
+
+    def _update_status(self, message: str) -> None:
+        self.status_var.set(message)
+
+    def _log(self, message: str) -> None:
+        def append() -> None:
+            if not self.log_widget:
+                return
+            self.log_widget.configure(state=tk.NORMAL)
+            self.log_widget.insert(tk.END, message + "\n")
+            self.log_widget.see(tk.END)
+            self.log_widget.configure(state=tk.DISABLED)
+
+        self._notify(append)
+
+    def _clear_workspace(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        self.image_paths.clear()
+        self._suspend_output_trace = True
+        self.output_path.set("")
+        self._suspend_output_trace = False
+        self._last_auto_output = None
+        self._reset_steps()
+        self._reset_progress(0)
+        self._reset_preview()
+        self._clear_log()
+        self._update_status("準備完了")
+
+    def _clear_log(self) -> None:
+        if not self.log_widget:
+            return
+        self.log_widget.configure(state=tk.NORMAL)
+        self.log_widget.delete("1.0", tk.END)
+        self.log_widget.configure(state=tk.DISABLED)
+
+    def _notify(self, callback: Callable[[], None]) -> None:
+        def safe_callback() -> None:
+            if self.frame.winfo_exists():
+                callback()
+
+        self.root.after(0, safe_callback)
+
+    def _handle_failure(self, message: str) -> None:
+        def _show() -> None:
+            messagebox.showerror("エラー", message)
+            self._update_status("エラーが発生しました。内容を確認してください。")
+
+        self._notify(_show)
+
+    def _on_output_path_changed(self) -> None:
+        if self._suspend_output_trace:
+            return
+        value = self.output_path.get().strip()
+        if value and self._last_auto_output and value == str(self._last_auto_output):
+            return
+        self._last_auto_output = None
+
+
 class OCRDesktopApp:
     """画像PDFを処理する簡易デスクトップアプリケーション。"""
 
@@ -682,8 +1170,11 @@ class OCRDesktopApp:
 
         self.notebook: ttk.Notebook | None = None
         self.ocr_tab: tk.Frame | None = None
+        self.image_tab: tk.Frame | None = None
         self.password_tab: tk.Frame | None = None
         self.password_workspace: PDFPasswordRemovalWorkspace | None = None
+        self.image_workspace: ImagesToPDFWorkspace | None = None
+        self.image_tab_geometry = "1100x720"
 
         self._create_widgets()
         self._rebuild_workspaces(1)
@@ -713,6 +1204,12 @@ class OCRDesktopApp:
 
         self.workspace_container = tk.Frame(self.ocr_tab)
         self.workspace_container.pack(fill=tk.BOTH, expand=True)
+
+        self.image_tab = tk.Frame(self.notebook)
+        self.notebook.add(self.image_tab, text="画像からPDF")
+
+        self.image_workspace = ImagesToPDFWorkspace(self, self.image_tab)
+        self.image_workspace.pack(fill=tk.BOTH, expand=True, padx=(12, 12), pady=(12, 12))
 
         self.password_tab = tk.Frame(self.notebook)
         self.notebook.add(self.password_tab, text="PDFパスワード解除")
@@ -776,6 +1273,8 @@ class OCRDesktopApp:
     def _on_tab_changed(self, _event: object | None = None) -> None:
         if self._is_ocr_tab_selected():
             self._apply_geometry(self.current_workspace_count)
+        elif self._is_image_tab_selected():
+            self.master.geometry(self.image_tab_geometry)
         else:
             self.master.geometry(self.single_geometry)
 
@@ -791,6 +1290,11 @@ class OCRDesktopApp:
         if not self.notebook or not self.ocr_tab:
             return True
         return self.notebook.select() == str(self.ocr_tab)
+
+    def _is_image_tab_selected(self) -> bool:
+        if not self.notebook or not self.image_tab:
+            return False
+        return self.notebook.select() == str(self.image_tab)
 
     def _resolve_layout_positions(self, count: int) -> list[tuple[int, int]]:
         if count <= 1:

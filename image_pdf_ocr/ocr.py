@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
-from typing import Callable, Iterable, Tuple, Union
+from typing import Callable, Iterable, Sequence, Tuple, Union
 
 import fitz  # type: ignore
 import pytesseract
@@ -531,6 +531,190 @@ def create_searchable_pdf(
         raise OCRConversionError(f"PDFを保存できませんでした: {exc}") from exc
     finally:
         output_doc.close()
+
+
+def _determine_canvas_size(image_paths: Sequence[Path]) -> tuple[int, int]:
+    """指定した画像群を収めるキャンバスサイズを決定する。"""
+
+    max_width = 0
+    max_height = 0
+
+    for path in image_paths:
+        try:
+            with Image.open(path) as image:
+                normalized = ImageOps.exif_transpose(image)
+                width, height = normalized.size
+        except UnboundLocalError:  # pragma: no cover - Pillow internal edge case
+            continue
+        except Exception as exc:
+            raise OCRConversionError(f"画像を読み込めませんでした: {path} ({exc})") from exc
+
+        max_width = max(max_width, width)
+        max_height = max(max_height, height)
+
+    if max_width <= 0 or max_height <= 0:
+        raise ValueError("有効な画像サイズを取得できませんでした。")
+
+    return max_width, max_height
+
+
+def _normalize_image_for_canvas(
+    image: Image.Image, target_width: int, target_height: int
+) -> Image.Image:
+    """キャンバスに合わせて余白付きで画像を整形する。"""
+
+    processed = ImageOps.exif_transpose(image)
+    processed = processed.convert("RGB")
+
+    width, height = processed.size
+    if width <= 0 or height <= 0:
+        return Image.new("RGB", (target_width, target_height), "white")
+
+    scale = min(target_width / width, target_height / height)
+    if scale <= 0:
+        scale = 1.0
+
+    new_size = (
+        max(1, int(round(width * scale))),
+        max(1, int(round(height * scale))),
+    )
+
+    if new_size != (width, height):
+        resized = processed.resize(new_size, Image.LANCZOS)
+    else:
+        resized = processed
+
+    canvas = Image.new("RGB", (target_width, target_height), "white")
+    offset = (
+        max((target_width - resized.width) // 2, 0),
+        max((target_height - resized.height) // 2, 0),
+    )
+    canvas.paste(resized, offset)
+    return canvas
+
+
+def create_searchable_pdf_from_images(
+    image_paths: Sequence[Union[str, os.PathLike]],
+    output_path: Union[str, os.PathLike],
+    progress_callback: Callable[[int, int, str], None] | None = None,
+    preview_callback: Callable[[int, int, Image.Image], None] | None = None,
+    cancel_event: Event | None = None,
+) -> None:
+    """複数の画像から検索可能なPDFを生成する。"""
+
+    if not find_and_set_tesseract_path():
+        raise OCRConversionError(
+            "Tesseract-OCRが見つかりません。インストールとPATH設定を確認してください。"
+        )
+
+    if not image_paths:
+        raise OCRConversionError("入力する画像ファイルを1つ以上選択してください。")
+
+    normalized_paths = [Path(path) for path in image_paths]
+    for path in normalized_paths:
+        if not path.exists():
+            raise FileNotFoundError(f"入力画像が見つかりません: {path}")
+
+    output_path = Path(output_path)
+    if output_path.suffix.lower() != ".pdf":
+        raise OCRConversionError("出力ファイルには.pdf拡張子を指定してください。")
+
+    _prepare_output_path(output_path)
+
+    font_path = _find_japanese_font_path()
+
+    try:
+        target_width, target_height = _determine_canvas_size(normalized_paths)
+    except ValueError as exc:
+        raise OCRConversionError(str(exc)) from exc
+
+    output_doc = fitz.open()
+    total = len(normalized_paths)
+    start_time = time.perf_counter()
+
+    def _dispatch_progress(current: int, message: str) -> None:
+        if progress_callback:
+            progress_callback(current, total, message)
+        else:
+            print(message, flush=True)
+
+    def _dispatch_preview(current: int, image: Image.Image) -> None:
+        if preview_callback:
+            preview_callback(current, total, image)
+
+    def _check_cancellation() -> None:
+        if cancel_event and cancel_event.is_set():
+            raise OCRCancelledError("処理がキャンセルされました。")
+
+    try:
+        for index, path in enumerate(normalized_paths, start=1):
+            _check_cancellation()
+
+            with Image.open(path) as raw_image:
+                prepared_image = _normalize_image_for_canvas(
+                    raw_image, target_width, target_height
+                )
+
+            _dispatch_preview(index, prepared_image.copy())
+
+            ocr_result = _perform_adaptive_ocr(prepared_image)
+            filtered = _filter_frame_by_confidence(
+                ocr_result.frame, _TEXT_RENDER_CONFIDENCE_THRESHOLD
+            )
+
+            _check_cancellation()
+
+            dpi = 300
+            width_pt = target_width * 72 / dpi
+            height_pt = target_height * 72 / dpi
+            page_rect = fitz.Rect(0, 0, width_pt, height_pt)
+            page = output_doc.new_page(width=width_pt, height=height_pt)
+
+            image_buffer = io.BytesIO()
+            prepared_image.save(image_buffer, format="PNG")
+            page.insert_image(page_rect, stream=image_buffer.getvalue())
+
+            coordinate_scale = 72 / dpi
+            for _, row in filtered.iterrows():
+                text = str(row.get("text", "")).strip()
+                if not text:
+                    continue
+                x, y, h = _extract_coordinates(row)
+                if x is None or y is None or h is None:
+                    continue
+                try:
+                    page.insert_text(
+                        (x * coordinate_scale, (y + h) * coordinate_scale),
+                        text,
+                        fontfile=str(font_path),
+                        fontsize=h * coordinate_scale * 0.8,
+                        render_mode=3,
+                    )
+                except RuntimeError:
+                    continue
+
+            message = _build_progress_message(index, total, start_time)
+            _dispatch_progress(index, message)
+
+        _check_cancellation()
+
+        output_doc.save(output_path, garbage=4, deflate=True, clean=True)
+    except OCRCancelledError:
+        output_doc.close()
+        raise
+    except PermissionError as exc:
+        output_doc.close()
+        raise OCRConversionError(
+            f"PDFを書き込めませんでした。権限を確認してください: {exc}"
+        ) from exc
+    except Exception as exc:
+        output_doc.close()
+        raise OCRConversionError(
+            f"画像からPDFを生成中に問題が発生しました: {exc}"
+        ) from exc
+    else:
+        output_doc.close()
+
 
 
 def extract_text_from_image_pdf(
