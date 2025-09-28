@@ -38,6 +38,7 @@ class ProcessingWorkspace:
         self.extract_btn: tk.Button | None = None
         self.cancel_btn: tk.Button | None = None
         self.clear_btn: tk.Button | None = None
+        self.clear_log_btn: tk.Button | None = None
         self.log_widget: ScrolledText | None = None
         self.progress: ttk.Progressbar | None = None
 
@@ -74,8 +75,17 @@ class ProcessingWorkspace:
 
     # --- UI構築 ---------------------------------------------------------
     def _create_widgets(self) -> None:
-        input_frame = tk.LabelFrame(self.frame, text="入力PDF")
-        input_frame.pack(fill=tk.X, padx=12, pady=(12, 6))
+        container = tk.Frame(self.frame)
+        container.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+
+        left_frame = tk.Frame(container)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        right_frame = tk.Frame(container)
+        right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0))
+
+        input_frame = tk.LabelFrame(left_frame, text="入力PDF")
+        input_frame.pack(fill=tk.X, pady=(0, 8))
 
         input_entry = tk.Entry(input_frame, textvariable=self.input_path)
         input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
@@ -85,8 +95,8 @@ class ProcessingWorkspace:
         )
         browse_input_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
 
-        output_pdf_frame = tk.LabelFrame(self.frame, text="検索可能PDFの出力先")
-        output_pdf_frame.pack(fill=tk.X, padx=12, pady=6)
+        output_pdf_frame = tk.LabelFrame(left_frame, text="検索可能PDFの保存先")
+        output_pdf_frame.pack(fill=tk.X, pady=(0, 8))
 
         output_pdf_entry = tk.Entry(output_pdf_frame, textvariable=self.output_pdf_path)
         output_pdf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
@@ -99,8 +109,8 @@ class ProcessingWorkspace:
         )
         browse_output_pdf_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
 
-        output_text_frame = tk.LabelFrame(self.frame, text="抽出テキストの保存先")
-        output_text_frame.pack(fill=tk.X, padx=12, pady=6)
+        output_text_frame = tk.LabelFrame(left_frame, text="抽出テキストの保存先")
+        output_text_frame.pack(fill=tk.X, pady=(0, 8))
 
         output_text_entry = tk.Entry(output_text_frame, textvariable=self.output_text_path)
         output_text_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
@@ -113,8 +123,8 @@ class ProcessingWorkspace:
         )
         browse_output_text_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
 
-        button_frame = tk.Frame(self.frame)
-        button_frame.pack(fill=tk.X, padx=12, pady=(6, 0))
+        button_frame = tk.Frame(left_frame)
+        button_frame.pack(fill=tk.X, pady=(0, 8))
 
         self.convert_btn = tk.Button(
             button_frame, text="検索可能PDFを作成", command=self._start_conversion
@@ -131,25 +141,32 @@ class ProcessingWorkspace:
         )
         self.cancel_btn.pack(side=tk.LEFT, padx=6)
 
-        clear_log_btn = tk.Button(button_frame, text="ログをクリア", command=self._clear_log)
-        clear_log_btn.pack(side=tk.LEFT, padx=6)
-
         self.clear_btn = tk.Button(
             button_frame, text="画面をクリア", command=self._clear_workspace
         )
         self.clear_btn.pack(side=tk.LEFT, padx=6)
 
-        self.log_widget = ScrolledText(self.frame, height=16, state=tk.DISABLED)
-        self.log_widget.pack(fill=tk.BOTH, expand=True, padx=12, pady=(12, 6))
-
-        status_frame = tk.Frame(self.frame)
-        status_frame.pack(fill=tk.X, padx=12, pady=(0, 12))
+        status_frame = tk.LabelFrame(left_frame, text="進行状況")
+        status_frame.pack(fill=tk.X)
 
         self.progress = ttk.Progressbar(status_frame, mode="indeterminate")
-        self.progress.pack(side=tk.LEFT, padx=(0, 12), pady=4)
+        self.progress.pack(fill=tk.X, padx=12, pady=(12, 4))
 
         status_label = tk.Label(status_frame, textvariable=self.status_var, anchor=tk.W)
-        status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        status_label.pack(fill=tk.X, padx=12, pady=(0, 12))
+
+        log_frame = tk.LabelFrame(right_frame, text="処理ログ")
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        log_toolbar = tk.Frame(log_frame)
+        log_toolbar.pack(fill=tk.X, padx=12, pady=(12, 0))
+
+        self.clear_log_btn = tk.Button(log_toolbar, text="ログをクリア", command=self._clear_log)
+        self.clear_log_btn.pack(side=tk.RIGHT)
+        self.clear_log_btn.configure(state=tk.DISABLED)
+
+        self.log_widget = ScrolledText(log_frame, height=18, state=tk.DISABLED)
+        self.log_widget.pack(fill=tk.BOTH, expand=True, padx=12, pady=(8, 12))
 
     # --- ファイルダイアログ ---------------------------------------------
     def _select_input_file(self) -> None:
@@ -227,6 +244,17 @@ class ProcessingWorkspace:
             self.cancel_btn.configure(state=tk.NORMAL if busy else tk.DISABLED)
         if self.clear_btn:
             self.clear_btn.configure(state=state)
+        if self.clear_log_btn:
+            if busy:
+                self.clear_log_btn.configure(state=tk.DISABLED)
+            else:
+                has_log = bool(
+                    self.log_widget
+                    and self.log_widget.get("1.0", tk.END).strip()
+                )
+                self.clear_log_btn.configure(
+                    state=tk.NORMAL if has_log else tk.DISABLED
+                )
         if self.progress:
             if busy:
                 self.progress.start(10)
@@ -424,6 +452,8 @@ class ProcessingWorkspace:
             self.log_widget.insert(tk.END, message + "\n")
             self.log_widget.see(tk.END)
             self.log_widget.configure(state=tk.DISABLED)
+            if self.clear_log_btn:
+                self.clear_log_btn.configure(state=tk.NORMAL)
 
         self._notify(append)
 
@@ -436,6 +466,8 @@ class ProcessingWorkspace:
         self.log_widget.configure(state=tk.NORMAL)
         self.log_widget.delete("1.0", tk.END)
         self.log_widget.configure(state=tk.DISABLED)
+        if self.clear_log_btn:
+            self.clear_log_btn.configure(state=tk.DISABLED)
 
     def _clear_workspace(self) -> None:
         if self._worker and self._worker.is_alive():
@@ -463,7 +495,9 @@ class PDFPasswordRemovalWorkspace:
 
         self.remove_btn: tk.Button | None = None
         self.clear_btn: tk.Button | None = None
+        self.clear_log_btn: tk.Button | None = None
         self.progress: ttk.Progressbar | None = None
+        self.log_widget: ScrolledText | None = None
 
         self._worker: threading.Thread | None = None
 
@@ -473,8 +507,17 @@ class PDFPasswordRemovalWorkspace:
         self.frame.pack(fill=fill, expand=expand, padx=padx, pady=pady)
 
     def _create_widgets(self) -> None:
-        input_frame = tk.LabelFrame(self.frame, text="入力PDF")
-        input_frame.pack(fill=tk.X, padx=12, pady=(12, 6))
+        container = tk.Frame(self.frame)
+        container.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+
+        left_frame = tk.Frame(container)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        right_frame = tk.Frame(container)
+        right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0))
+
+        input_frame = tk.LabelFrame(left_frame, text="入力PDF")
+        input_frame.pack(fill=tk.X, pady=(0, 8))
 
         input_entry = tk.Entry(input_frame, textvariable=self.input_path)
         input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
@@ -484,17 +527,17 @@ class PDFPasswordRemovalWorkspace:
         )
         browse_input_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
 
-        password_frame = tk.LabelFrame(self.frame, text="PDFパスワード")
-        password_frame.pack(fill=tk.X, padx=12, pady=6)
+        password_frame = tk.LabelFrame(left_frame, text="PDFパスワード")
+        password_frame.pack(fill=tk.X, pady=(0, 8))
 
         password_label = tk.Label(password_frame, text="パスワードを入力してください。")
         password_label.pack(anchor=tk.W, padx=12, pady=(8, 0))
 
         password_entry = tk.Entry(password_frame, textvariable=self.password, show="*")
-        password_entry.pack(fill=tk.X, padx=12, pady=(4, 8))
+        password_entry.pack(fill=tk.X, padx=12, pady=(4, 12))
 
-        output_frame = tk.LabelFrame(self.frame, text="パスワード解除後の保存先")
-        output_frame.pack(fill=tk.X, padx=12, pady=6)
+        output_frame = tk.LabelFrame(left_frame, text="パスワード解除後の保存先")
+        output_frame.pack(fill=tk.X, pady=(0, 8))
 
         output_entry = tk.Entry(output_frame, textvariable=self.output_path)
         output_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
@@ -504,8 +547,8 @@ class PDFPasswordRemovalWorkspace:
         )
         browse_output_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
 
-        button_frame = tk.Frame(self.frame)
-        button_frame.pack(fill=tk.X, padx=12, pady=(6, 0))
+        button_frame = tk.Frame(left_frame)
+        button_frame.pack(fill=tk.X, pady=(0, 8))
 
         self.remove_btn = tk.Button(
             button_frame, text="パスワードを解除", command=self._start_removal
@@ -517,14 +560,27 @@ class PDFPasswordRemovalWorkspace:
         )
         self.clear_btn.pack(side=tk.LEFT, padx=6)
 
-        status_frame = tk.Frame(self.frame)
-        status_frame.pack(fill=tk.X, padx=12, pady=(12, 12))
+        status_frame = tk.LabelFrame(left_frame, text="進行状況")
+        status_frame.pack(fill=tk.X)
 
         self.progress = ttk.Progressbar(status_frame, mode="indeterminate")
-        self.progress.pack(side=tk.LEFT, padx=(0, 12), pady=4)
+        self.progress.pack(fill=tk.X, padx=12, pady=(12, 4))
 
         status_label = tk.Label(status_frame, textvariable=self.status_var, anchor=tk.W)
-        status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        status_label.pack(fill=tk.X, padx=12, pady=(0, 12))
+
+        log_frame = tk.LabelFrame(right_frame, text="処理ログ")
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        log_toolbar = tk.Frame(log_frame)
+        log_toolbar.pack(fill=tk.X, padx=12, pady=(12, 0))
+
+        self.clear_log_btn = tk.Button(log_toolbar, text="ログをクリア", command=self._clear_log)
+        self.clear_log_btn.pack(side=tk.RIGHT)
+        self.clear_log_btn.configure(state=tk.DISABLED)
+
+        self.log_widget = ScrolledText(log_frame, height=14, state=tk.DISABLED)
+        self.log_widget.pack(fill=tk.BOTH, expand=True, padx=12, pady=(8, 12))
 
     def _select_input_file(self) -> None:
         file_path = filedialog.askopenfilename(
@@ -550,35 +606,65 @@ class PDFPasswordRemovalWorkspace:
         if file_path:
             self.output_path.set(file_path)
 
+    def _append_log(self, message: str) -> None:
+        if not self.log_widget:
+            return
+        self.log_widget.configure(state=tk.NORMAL)
+        self.log_widget.insert(tk.END, message + "\n")
+        self.log_widget.see(tk.END)
+        self.log_widget.configure(state=tk.DISABLED)
+        if self.clear_log_btn:
+            self.clear_log_btn.configure(state=tk.NORMAL)
+
+    def _log(self, message: str) -> None:
+        self._notify(lambda msg=message: self._append_log(msg))
+
+    def _clear_log(self) -> None:
+        if not self.log_widget:
+            return
+        self.log_widget.configure(state=tk.NORMAL)
+        self.log_widget.delete("1.0", tk.END)
+        self.log_widget.configure(state=tk.DISABLED)
+        if self.clear_log_btn:
+            self.clear_log_btn.configure(state=tk.DISABLED)
+
     def _start_removal(self) -> None:
         if self._worker and self._worker.is_alive():
             return
 
         input_value = self.input_path.get().strip()
         if not input_value:
+            self._append_log("エラー: 入力PDFが未選択です。")
             self._show_error("入力PDFを選択してください。")
             return
         input_path = Path(input_value)
         if not input_path.exists():
+            self._append_log("エラー: 指定された入力PDFが見つかりません。")
             self._show_error("指定された入力PDFが見つかりません。")
             return
 
         output_value = self.output_path.get().strip()
         if not output_value:
+            self._append_log("エラー: 保存先が指定されていません。")
             self._show_error("保存先を指定してください。")
             return
         output_path = Path(output_value)
         if output_path.suffix.lower() != ".pdf":
+            self._append_log("エラー: 保存先は.pdf拡張子である必要があります。")
             self._show_error("保存先には.pdf拡張子を指定してください。")
             return
 
         password = self.password.get()
         if not password:
+            self._append_log("エラー: パスワードが入力されていません。")
             self._show_error("パスワードを入力してください。")
             return
 
         self._set_busy(True)
         self._update_status("パスワードを解除しています…")
+        self._append_log(
+            f"処理開始: {input_path} → {output_path}"
+        )
         self._run_in_thread(
             lambda: self._remove_task(
                 input_path=input_path, output_path=output_path, password=password
@@ -606,16 +692,17 @@ class PDFPasswordRemovalWorkspace:
             message = f"予期しないエラーが発生しました: {exc}"
             self._notify(lambda msg=message: self._handle_failure(msg))
         else:
-            self._notify(
-                lambda: (
-                    messagebox.showinfo(
-                        "完了", f"パスワードを解除したPDFを保存しました:\n{output_path}"
-                    ),
-                    self._update_status("パスワードの解除が完了しました。"),
+            def on_success() -> None:
+                self._append_log(f"完了: {output_path}")
+                messagebox.showinfo(
+                    "完了", f"パスワードを解除したPDFを保存しました:\n{output_path}"
                 )
-            )
+                self._update_status("パスワードの解除が完了しました。")
+
+            self._notify(on_success)
 
     def _handle_failure(self, message: str) -> None:
+        self._append_log(f"エラー: {message}")
         self._show_error(message)
         self._update_status("エラーが発生しました。内容を確認してください。")
 
@@ -655,6 +742,7 @@ class PDFPasswordRemovalWorkspace:
         self.output_path.set("")
         self.password.set("")
         self.status_var.set("準備完了")
+        self._clear_log()
 
 
 
