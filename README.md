@@ -43,6 +43,25 @@ pip install -r requirements.txt
 4. 「検索可能PDFを作成」または「テキストを抽出」ボタンを押すと処理が開始されます。
 5. 下部のログペインに進捗やエラーが表示され、処理完了時はダイアログでも通知されます。
 
+## Windowsでのデスクトップアプリ配布手順
+
+PyInstallerを使うと、GUIアプリを単一の`.exe`としてまとめて配布できます。以下は最小構成の例です。
+
+1. 事前に仮想環境を作成し、このリポジトリの依存関係と `pyinstaller` をインストールします。
+   ```bash
+   pip install -r requirements.txt
+   pip install pyinstaller
+   ```
+2. プロジェクトルートで次のコマンドを実行し、実行ファイルを生成します。
+   ```bash
+   pyinstaller ocr_desktop_app.py --onefile --noconsole --name ImagePdfOcr
+   ```
+   - `dist/ImagePdfOcr.exe` が生成されます。任意で `--icon` オプションを追加すればアイコンも設定できます。
+3. ユーザー環境でTesseractを別途インストールせずに動かす場合は、`tesseract.exe` と `tessdata` 一式を同梱します。
+   - 例: `C:\Program Files\Tesseract-OCR` を丸ごと `dist` 配下にコピーし、`dist/Tesseract-OCR/tesseract.exe` が存在する状態にします。
+   - 本アプリは実行ファイルと同じフォルダ、もしくは `Tesseract-OCR` フォルダ内の `tesseract.exe` を自動検出します。
+4. `dist` フォルダをZIP化して配布すれば、他のユーザーは解凍後に `ImagePdfOcr.exe` を実行するだけで利用できます。
+
 ## CLIスクリプトの利用
 
 ### 検索可能PDFの作成
@@ -63,6 +82,7 @@ python extract_text_from_pdf.py --pdf_path "入力PDFのパス" --output_path "�
   - Tesseract本体が未インストール、またはインストール済みでもPATHに登録されていない場合に発生します。
   - コマンドラインから `tesseract -v` が正常に実行できるか確認してください。
   - インストール先が標準パス以外の場合は、環境変数 `TESSERACT_CMD`（または `TESSERACT_PATH`）に実行ファイルのパスを設定してください。GUI/CLIいずれの処理でもこの設定が利用されます。
+  - PyInstaller版を配布する際は、`ImagePdfOcr.exe` と同じ階層、もしくは `Tesseract-OCR` フォルダ配下に `tesseract.exe` を同梱することで自動的に認識されます。
 
 ## ライセンス
 
