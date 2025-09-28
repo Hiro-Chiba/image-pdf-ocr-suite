@@ -9,6 +9,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 from typing import Callable, Iterable, Tuple, Union
 
 import fitz  # type: ignore
@@ -20,6 +21,10 @@ from shutil import which
 
 class OCRConversionError(RuntimeError):
     """OCR変換処理で発生した例外。"""
+
+
+class OCRCancelledError(RuntimeError):
+    """ユーザーによって処理がキャンセルされたことを示す例外。"""
 _AVERAGE_CONFIDENCE_THRESHOLD = float(os.environ.get("OCR_CONFIDENCE_THRESHOLD", "65"))
 _TEXT_RENDER_CONFIDENCE_THRESHOLD = 50.0
 _UPSCALE_FACTOR = 1.5
@@ -382,6 +387,7 @@ def create_searchable_pdf(
     input_path: Union[str, os.PathLike],
     output_path: Union[str, os.PathLike],
     progress_callback: Callable[[str], None] | None = None,
+    cancel_event: Event | None = None,
 ) -> None:
     """画像PDFをOCRして検索可能なPDFを生成する。"""
     if not find_and_set_tesseract_path():
@@ -416,8 +422,13 @@ def create_searchable_pdf(
     if total_pages == 0:
         _dispatch_progress("ページが存在しないPDFです。処理を終了します。")
 
+    def _check_cancellation() -> None:
+        if cancel_event and cancel_event.is_set():
+            raise OCRCancelledError("処理がキャンセルされました。")
+
     try:
         for index, page in enumerate(input_doc, start=1):
+            _check_cancellation()
             pix = page.get_pixmap(dpi=300)
             image_bytes = io.BytesIO(pix.tobytes("png"))
             with Image.open(image_bytes) as pil_image:
@@ -452,9 +463,13 @@ def create_searchable_pdf(
             message = _build_progress_message(index, total_pages, start_time)
             _dispatch_progress(message)
     except Exception as exc:
+        if isinstance(exc, OCRCancelledError):
+            raise
         raise OCRConversionError(f"ページ処理中に問題が発生しました: {exc}") from exc
     finally:
         input_doc.close()
+
+    _check_cancellation()
 
     try:
         output_doc.save(output_path, garbage=4, deflate=True, clean=True)
@@ -471,6 +486,7 @@ def create_searchable_pdf(
 def extract_text_from_image_pdf(
     input_path: Union[str, os.PathLike],
     progress_callback: Callable[[str], None] | None = None,
+    cancel_event: Event | None = None,
 ) -> str:
     """画像ベースのPDFからOCRでテキストを抽出して返す。"""
 
@@ -502,8 +518,13 @@ def extract_text_from_image_pdf(
         _dispatch_progress("ページが存在しないPDFです。処理を終了します。")
         document.close()
         return "\n"
+    def _check_cancellation() -> None:
+        if cancel_event and cancel_event.is_set():
+            raise OCRCancelledError("処理がキャンセルされました。")
+
     try:
         for index, page in enumerate(document, start=1):
+            _check_cancellation()
             pix = page.get_pixmap(dpi=300)
             image_bytes = io.BytesIO(pix.tobytes("png"))
             with Image.open(image_bytes) as pil_image:
@@ -514,9 +535,13 @@ def extract_text_from_image_pdf(
             message = _build_progress_message(index, total_pages, start_time)
             _dispatch_progress(message)
     except Exception as exc:
+        if isinstance(exc, OCRCancelledError):
+            raise
         raise OCRConversionError(f"テキスト抽出中に問題が発生しました: {exc}") from exc
     finally:
         document.close()
+
+    _check_cancellation()
 
     return "\n".join(texts).strip() + "\n"
 
@@ -525,14 +550,20 @@ def extract_text_to_file(
     input_path: Union[str, os.PathLike],
     output_path: Union[str, os.PathLike],
     progress_callback: Callable[[str], None] | None = None,
+    cancel_event: Event | None = None,
 ) -> None:
     """画像PDFから抽出したテキストをファイルに保存する。"""
 
     text = extract_text_from_image_pdf(
-        input_path, progress_callback=progress_callback
+        input_path,
+        progress_callback=progress_callback,
+        cancel_event=cancel_event,
     )
     output_path = Path(output_path)
     _prepare_output_path(output_path)
+
+    if cancel_event and cancel_event.is_set():
+        raise OCRCancelledError("処理がキャンセルされました。")
 
     try:
         output_path.write_text(text, encoding="utf-8")

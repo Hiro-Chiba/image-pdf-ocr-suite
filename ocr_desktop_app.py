@@ -11,31 +11,53 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from image_pdf_ocr import (
+    OCRCancelledError,
     OCRConversionError,
     create_searchable_pdf,
     extract_text_to_file,
 )
 
 
-class OCRDesktopApp:
-    """画像PDFを処理する簡易デスクトップアプリケーション。"""
+class ProcessingWorkspace:
+    """単一のOCR処理画面を構築・管理する。"""
 
-    def __init__(self, master: tk.Tk) -> None:
-        self.master = master
-        self.master.title("Image PDF OCR Suite")
-        self.master.geometry("720x520")
+    def __init__(self, app: "OCRDesktopApp", parent: tk.Widget) -> None:
+        self.app = app
+        self.root = app.master
+        self.frame = tk.Frame(parent)
 
         self.input_path = tk.StringVar()
         self.output_pdf_path = tk.StringVar()
         self.output_text_path = tk.StringVar()
         self.status_var = tk.StringVar(value="準備完了")
 
-        self.master.report_callback_exception = self._handle_ui_exception
+        self.convert_btn: tk.Button | None = None
+        self.extract_btn: tk.Button | None = None
+        self.cancel_btn: tk.Button | None = None
+        self.log_widget: ScrolledText | None = None
+        self.progress: ttk.Progressbar | None = None
+
+        self._worker: threading.Thread | None = None
+        self._cancel_event: threading.Event | None = None
+
         self._create_widgets()
 
-    # UI構築
+    # --- ライフサイクル -------------------------------------------------
+    def pack(self, *, side: str, padx: tuple[int, int], pady: tuple[int, int]) -> None:
+        self.frame.pack(side=side, fill=tk.BOTH, expand=True, padx=padx, pady=pady)
+
+    def prepare_for_destroy(self) -> None:
+        self._cancel_running_task()
+        worker = self._worker
+        if worker and worker.is_alive():
+            worker.join(timeout=0.1)
+
+    def destroy(self) -> None:
+        self.frame.destroy()
+
+    # --- UI構築 ---------------------------------------------------------
     def _create_widgets(self) -> None:
-        input_frame = tk.LabelFrame(self.master, text="入力PDF")
+        input_frame = tk.LabelFrame(self.frame, text="入力PDF")
         input_frame.pack(fill=tk.X, padx=12, pady=(12, 6))
 
         input_entry = tk.Entry(input_frame, textvariable=self.input_path)
@@ -46,12 +68,10 @@ class OCRDesktopApp:
         )
         browse_input_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
 
-        output_pdf_frame = tk.LabelFrame(self.master, text="検索可能PDFの出力先")
+        output_pdf_frame = tk.LabelFrame(self.frame, text="検索可能PDFの出力先")
         output_pdf_frame.pack(fill=tk.X, padx=12, pady=6)
 
-        output_pdf_entry = tk.Entry(
-            output_pdf_frame, textvariable=self.output_pdf_path
-        )
+        output_pdf_entry = tk.Entry(output_pdf_frame, textvariable=self.output_pdf_path)
         output_pdf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
 
         browse_output_pdf_btn = tk.Button(
@@ -62,12 +82,10 @@ class OCRDesktopApp:
         )
         browse_output_pdf_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
 
-        output_text_frame = tk.LabelFrame(self.master, text="抽出テキストの保存先")
+        output_text_frame = tk.LabelFrame(self.frame, text="抽出テキストの保存先")
         output_text_frame.pack(fill=tk.X, padx=12, pady=6)
 
-        output_text_entry = tk.Entry(
-            output_text_frame, textvariable=self.output_text_path
-        )
+        output_text_entry = tk.Entry(output_text_frame, textvariable=self.output_text_path)
         output_text_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 6), pady=8)
 
         browse_output_text_btn = tk.Button(
@@ -78,7 +96,7 @@ class OCRDesktopApp:
         )
         browse_output_text_btn.pack(side=tk.LEFT, padx=(0, 12), pady=8)
 
-        button_frame = tk.Frame(self.master)
+        button_frame = tk.Frame(self.frame)
         button_frame.pack(fill=tk.X, padx=12, pady=(6, 0))
 
         self.convert_btn = tk.Button(
@@ -91,13 +109,18 @@ class OCRDesktopApp:
         )
         self.extract_btn.pack(side=tk.LEFT, padx=6)
 
+        self.cancel_btn = tk.Button(
+            button_frame, text="キャンセル", state=tk.DISABLED, command=self._cancel_running_task
+        )
+        self.cancel_btn.pack(side=tk.LEFT, padx=6)
+
         clear_btn = tk.Button(button_frame, text="ログをクリア", command=self._clear_log)
         clear_btn.pack(side=tk.LEFT, padx=6)
 
-        self.log_widget = ScrolledText(self.master, height=16, state=tk.DISABLED)
+        self.log_widget = ScrolledText(self.frame, height=16, state=tk.DISABLED)
         self.log_widget.pack(fill=tk.BOTH, expand=True, padx=12, pady=(12, 6))
 
-        status_frame = tk.Frame(self.master)
+        status_frame = tk.Frame(self.frame)
         status_frame.pack(fill=tk.X, padx=12, pady=(0, 12))
 
         self.progress = ttk.Progressbar(status_frame, mode="indeterminate")
@@ -106,7 +129,7 @@ class OCRDesktopApp:
         status_label = tk.Label(status_frame, textvariable=self.status_var, anchor=tk.W)
         status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-    # ファイルダイアログ
+    # --- ファイルダイアログ ---------------------------------------------
     def _select_input_file(self) -> None:
         file_path = filedialog.askopenfilename(
             title="PDFファイルを選択",
@@ -117,7 +140,8 @@ class OCRDesktopApp:
             self._suggest_output_paths(Path(file_path))
 
     def _select_output_pdf(self) -> None:
-        default = Path(self.output_pdf_path.get()) if self.output_pdf_path.get() else None
+        current = self.output_pdf_path.get()
+        default = Path(current) if current else None
         initialdir = default.parent if default else None
         initialfile = default.name if default else None
         file_path = filedialog.asksaveasfilename(
@@ -131,9 +155,8 @@ class OCRDesktopApp:
             self.output_pdf_path.set(file_path)
 
     def _select_output_text(self) -> None:
-        default = (
-            Path(self.output_text_path.get()) if self.output_text_path.get() else None
-        )
+        current = self.output_text_path.get()
+        default = Path(current) if current else None
         initialdir = default.parent if default else None
         initialfile = default.name if default else None
         file_path = filedialog.asksaveasfilename(
@@ -146,7 +169,7 @@ class OCRDesktopApp:
         if file_path:
             self.output_text_path.set(file_path)
 
-    # バリデーション
+    # --- バリデーション -------------------------------------------------
     def _validate_input(self) -> Path | None:
         if not self.input_path.get():
             self._show_error("入力PDFを選択してください。")
@@ -157,21 +180,41 @@ class OCRDesktopApp:
             return None
         return input_path
 
-    # スレッドユーティリティ
+    # --- スレッド制御 ---------------------------------------------------
     def _run_in_thread(self, target: Callable[[], None]) -> None:
-        thread = threading.Thread(target=target, daemon=True)
-        thread.start()
+        def wrapper() -> None:
+            try:
+                target()
+            finally:
+                self._worker = None
+                self._cancel_event = None
+                self._notify(lambda: self._set_busy(False))
+
+        self._worker = threading.Thread(target=wrapper, daemon=True)
+        self._worker.start()
 
     def _set_busy(self, busy: bool) -> None:
-        state = tk.DISABLED if busy else tk.NORMAL
-        self.convert_btn.configure(state=state)
-        self.extract_btn.configure(state=state)
-        if busy:
-            self.progress.start(10)
-        else:
-            self.progress.stop()
+        if self.convert_btn and self.extract_btn and self.cancel_btn and self.progress:
+            state = tk.DISABLED if busy else tk.NORMAL
+            self.convert_btn.configure(state=state)
+            self.extract_btn.configure(state=state)
+            self.cancel_btn.configure(state=tk.NORMAL if busy else tk.DISABLED)
+            if busy:
+                self.progress.start(10)
+            else:
+                self.progress.stop()
 
+    def _cancel_running_task(self) -> None:
+        if self._cancel_event and not self._cancel_event.is_set():
+            self._cancel_event.set()
+            self._log("キャンセル要求を送信しました。")
+            self._notify(lambda: self._update_status("キャンセルしています…"))
+
+    # --- ボタン操作 -----------------------------------------------------
     def _start_conversion(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+
         input_path = self._validate_input()
         if not input_path:
             return
@@ -190,6 +233,7 @@ class OCRDesktopApp:
             self._show_error("入力ファイルと同じパスには保存できません。保存先を変更してください。")
             return
 
+        self._cancel_event = threading.Event()
         self._set_busy(True)
         self._update_status("検索可能PDFを生成しています…")
         self._run_in_thread(
@@ -197,6 +241,9 @@ class OCRDesktopApp:
         )
 
     def _start_extraction(self) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+
         input_path = self._validate_input()
         if not input_path:
             return
@@ -215,13 +262,14 @@ class OCRDesktopApp:
             self._show_error("入力PDFと同じファイル名には保存できません。")
             return
 
+        self._cancel_event = threading.Event()
         self._set_busy(True)
         self._update_status("テキストを抽出しています…")
         self._run_in_thread(
             lambda: self._extract_task(input_path=input_path, output_path=output_path)
         )
 
-    # 実際の処理
+    # --- 実処理 ---------------------------------------------------------
     def _convert_task(self, input_path: Path, output_path: Path) -> None:
         self._log(f"検索可能PDFを生成中: {output_path}")
         try:
@@ -229,7 +277,11 @@ class OCRDesktopApp:
                 input_path,
                 output_path,
                 progress_callback=self._make_progress_callback(),
+                cancel_event=self._cancel_event,
             )
+        except OCRCancelledError:
+            self._log("検索可能PDFの作成をキャンセルしました。")
+            self._notify(lambda: self._update_status("検索可能PDFの作成をキャンセルしました。"))
         except (FileNotFoundError, OCRConversionError) as exc:
             message = str(exc)
             self._log(f"エラー: {message}")
@@ -239,7 +291,7 @@ class OCRDesktopApp:
                     self._update_status("エラーが発生しました。ログをご確認ください。"),
                 )
             )
-        except Exception as exc:  # 予期しない例外
+        except Exception as exc:
             self._log(f"予期しないエラー: {exc}")
             self._notify(
                 lambda: (
@@ -254,9 +306,9 @@ class OCRDesktopApp:
                     "完了", f"検索可能なPDFを保存しました:\n{output_path}"
                 )
             )
-            self._notify(lambda: self._update_status("検索可能PDFの作成が完了しました。"))
-        finally:
-            self._notify(lambda: self._set_busy(False))
+            self._notify(
+                lambda: self._update_status("検索可能PDFの作成が完了しました。")
+            )
 
     def _extract_task(self, input_path: Path, output_path: Path) -> None:
         self._log(f"テキストを抽出中: {output_path}")
@@ -265,7 +317,11 @@ class OCRDesktopApp:
                 input_path,
                 output_path,
                 progress_callback=self._make_progress_callback(),
+                cancel_event=self._cancel_event,
             )
+        except OCRCancelledError:
+            self._log("テキスト抽出をキャンセルしました。")
+            self._notify(lambda: self._update_status("テキスト抽出をキャンセルしました。"))
         except (FileNotFoundError, OCRConversionError) as exc:
             message = str(exc)
             self._log(f"エラー: {message}")
@@ -290,11 +346,11 @@ class OCRDesktopApp:
                     "完了", f"テキストを保存しました:\n{output_path}"
                 )
             )
-            self._notify(lambda: self._update_status("テキスト抽出が完了しました。"))
-        finally:
-            self._notify(lambda: self._set_busy(False))
+            self._notify(
+                lambda: self._update_status("テキスト抽出が完了しました。")
+            )
 
-    # ユーティリティ
+    # --- ユーティリティ -------------------------------------------------
     def _suggest_output_paths(self, input_path: Path) -> None:
         stem = input_path.stem
         parent = input_path.parent
@@ -304,7 +360,11 @@ class OCRDesktopApp:
             self.output_text_path.set(str(parent / f"{stem}_text.txt"))
 
     def _notify(self, callback: Callable[[], None]) -> None:
-        self.master.after(0, callback)
+        def safe_callback() -> None:
+            if self.frame.winfo_exists():
+                callback()
+
+        self.root.after(0, safe_callback)
 
     def _make_progress_callback(self) -> Callable[[str], None]:
         def _callback(message: str) -> None:
@@ -318,6 +378,8 @@ class OCRDesktopApp:
 
     def _log(self, message: str) -> None:
         def append() -> None:
+            if not self.log_widget:
+                return
             self.log_widget.configure(state=tk.NORMAL)
             self.log_widget.insert(tk.END, message + "\n")
             self.log_widget.see(tk.END)
@@ -329,13 +391,85 @@ class OCRDesktopApp:
         messagebox.showerror("エラー", message)
 
     def _clear_log(self) -> None:
+        if not self.log_widget:
+            return
         self.log_widget.configure(state=tk.NORMAL)
         self.log_widget.delete("1.0", tk.END)
         self.log_widget.configure(state=tk.DISABLED)
 
+
+class OCRDesktopApp:
+    """画像PDFを処理する簡易デスクトップアプリケーション。"""
+
+    def __init__(self, master: tk.Tk) -> None:
+        self.master = master
+        self.master.title("Image PDF OCR Suite")
+        self.single_geometry = "720x520"
+        self.double_geometry = "1420x520"
+        self.master.geometry(self.single_geometry)
+
+        self.master.report_callback_exception = self._handle_ui_exception
+
+        self.mode_var = tk.StringVar(value="1つの作業")
+        self.workspaces: list[ProcessingWorkspace] = []
+
+        self._create_widgets()
+        self._rebuild_workspaces(1)
+
+    def _create_widgets(self) -> None:
+        control_frame = tk.Frame(self.master)
+        control_frame.pack(fill=tk.X, padx=12, pady=(12, 0))
+
+        mode_label = tk.Label(control_frame, text="同時に処理する作業数:")
+        mode_label.pack(side=tk.LEFT)
+
+        mode_combo = ttk.Combobox(
+            control_frame,
+            state="readonly",
+            values=("1つの作業", "2つの作業"),
+            width=15,
+            textvariable=self.mode_var,
+        )
+        mode_combo.pack(side=tk.LEFT, padx=(8, 0))
+        mode_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_mode_change())
+
+        self.workspace_container = tk.Frame(self.master)
+        self.workspace_container.pack(fill=tk.BOTH, expand=True)
+
+    def _on_mode_change(self) -> None:
+        count = 2 if self.mode_var.get().startswith("2") else 1
+        self._rebuild_workspaces(count)
+
+    def _rebuild_workspaces(self, count: int) -> None:
+        for workspace in self.workspaces:
+            workspace.prepare_for_destroy()
+            workspace.destroy()
+        self.workspaces.clear()
+
+        for child in self.workspace_container.winfo_children():
+            child.destroy()
+
+        if count == 2:
+            self.master.geometry(self.double_geometry)
+        else:
+            self.master.geometry(self.single_geometry)
+
+        for index in range(count):
+            workspace = ProcessingWorkspace(self, self.workspace_container)
+            pad_left = 12 if index == 0 else 6
+            pad_right = 12 if index == count - 1 else 6
+            workspace.pack(side=tk.LEFT, padx=(pad_left, pad_right), pady=(12, 12))
+            self.workspaces.append(workspace)
+
+            if count == 2 and index == 0:
+                separator = ttk.Separator(self.workspace_container, orient=tk.VERTICAL)
+                separator.pack(side=tk.LEFT, fill=tk.Y)
+
     def _handle_ui_exception(self, exc_type, exc_value, exc_traceback) -> None:  # type: ignore[override]
-        self._log(f"UIエラー: {exc_value}")
-        self._update_status("UIで予期しないエラーが発生しました。ログをご確認ください。")
+        message = f"UIエラー: {exc_value}"
+        for workspace in self.workspaces:
+            workspace._log(message)
+            workspace._update_status("UIで予期しないエラーが発生しました。ログをご確認ください。")
         messagebox.showerror("UIエラー", "予期しないUIエラーが発生しました。ログを確認してください。")
 
 
