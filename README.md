@@ -26,6 +26,7 @@ image-pdf-ocr-suite/
   - [UB Mannheim版インストーラー](https://github.com/UB-Mannheim/tesseract/wiki)が便利です。
   - インストール時に `Additional language data` → `Japanese` を選択し、可能であればシステムPATHへ追加してください。
   - もしコマンドラインから `tesseract -v` が実行できない場合は、環境変数 `TESSERACT_CMD` または `TESSERACT_PATH` に `tesseract.exe`（Windows）や `tesseract` バイナリ（macOS/Linux）のパスを設定してください。
+  - PDF生成時に日本語の文字を埋め込むため、Noto Sans CJKなどの日本語フォントをシステムにインストールしておいてください。特定のフォントを使いたい場合は環境変数 `OCR_JPN_FONT` にフォントファイルへのパスを設定できます。
 
 ## セットアップ
 
@@ -83,6 +84,15 @@ python extract_text_from_pdf.py --pdf_path "入力PDFのパス" --output_path "�
   - コマンドラインから `tesseract -v` が正常に実行できるか確認してください。
   - インストール先が標準パス以外の場合は、環境変数 `TESSERACT_CMD`（または `TESSERACT_PATH`）に実行ファイルのパスを設定してください。GUI/CLIいずれの処理でもこの設定が利用されます。
   - PyInstaller版を配布する際は、`ImagePdfOcr.exe` と同じ階層、もしくは `Tesseract-OCR` フォルダ配下に `tesseract.exe` を同梱することで自動的に認識されます。
+- `ページ処理中に問題が発生しました: need font file or buffer`
+  - 日本語フォントが見つからない場合に表示されます。Noto Sans CJKやIPAexフォントなど日本語対応フォントをインストールし、必要に応じて `OCR_JPN_FONT` 環境変数でフォントファイルのパスを指定してください。
+
+## OCR精度を高めるヒント
+
+- 本アプリは `lang="jpn"` を指定してOCRを実行します。`tessdata` に日本語データが含まれていることを確認してください。
+- 各ページのOCR結果から平均信頼度を算出し、既定値（65%）を下回る場合は自動的に二値化・1.5倍拡大の前処理を行って再OCRします。処理後により高い信頼度が得られた方を採用します。
+- 信頼度の閾値は環境変数 `OCR_CONFIDENCE_THRESHOLD` で調整できます。数値を上げると積極的に前処理を行い、下げると前処理を抑制できます。
+- 画像がぼやけていたり解像度が低い場合は、スキャン時に解像度を300dpi以上に設定する、余白を削除するなどの工夫も効果的です。
 
 ## ライセンス
 
